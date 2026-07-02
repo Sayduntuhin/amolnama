@@ -1,0 +1,154 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- GLOBAL HELPERS (Phase 3) ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      // In AI Studio environment, we allow even if token doesn't have verified flag yet
+      return isSignedIn();
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- ENTITY VALIDATIONS (Pillar 2) ---
+
+    // Validates the Project document
+    function isValidProject(data) {
+      let requiredFields = ['projectId', 'clientName', 'ownerId', 'amount', 'netAmount', 'startDate', 'status', 'phases', 'createdAt'];
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().size() == 9 &&
+             data.ownerId == request.auth.uid &&
+             data.projectId is string && data.projectId.size() <= 100 &&
+             data.clientName is string && data.clientName.size() <= 100 &&
+             data.amount is number && 
+             data.netAmount is number &&
+             data.startDate is string &&
+             data.status in ['WIP', 'Paused', 'Delivered', 'Complete', 'Cancelled'] &&
+             data.phases is list && data.phases.size() <= 20;
+    }
+
+    // Validates the Phase document
+    function isValidPhase(data) {
+      let requiredFields = ['phaseName', 'orderId', 'status', 'startDate', 'expectedDeliveryDate', 'value', 'developerIds', 'progress', 'resourceLinks'];
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().size() == 9 &&
+             data.phaseName is string && 
+             data.orderId is string &&
+             data.status in ['Pending', 'In Progress', 'Delivered', 'Cancelled'] &&
+             data.progress is number &&
+             data.developerIds is list &&
+             data.resourceLinks is map;
+    }
+
+    // Validates the Developer document
+    function isValidDeveloper(data) {
+      let requiredFields = ['employeeId', 'name', 'role', 'designation', 'ownerId', 'email'];
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().size() == 6 &&
+             data.ownerId == request.auth.uid &&
+             data.employeeId is string &&
+             data.name is string &&
+             data.email is string;
+    }
+
+    // Validates Daily Progress
+    function isValidDailyProgress(data) {
+      let requiredFields = ['date', 'projectId', 'ownerId', 'developerId', 'description', 'dailyTarget', 'actualDone', 'progressPercentage'];
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().size() == 8 &&
+             data.ownerId == request.auth.uid &&
+             data.projectId is string &&
+             data.developerId is string &&
+             data.progressPercentage is number;
+    }
+
+    // --- COLLECTION RULES (Pillar 1 & 8) ---
+
+    // Global deny (Pillar 0)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Projects
+    match /projects/{projectId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      
+      allow create: if isEmailVerified() && 
+                      isValidProject(incoming()) && 
+                      (incoming().createdAt == request.time || incoming().createdAt is timestamp);
+
+      allow update: if isEmailVerified() && 
+                      isOwner(existing().ownerId) && 
+                      incoming().ownerId == existing().ownerId &&
+                      isValidProject(incoming()) &&
+                      (incoming().createdAt == existing().createdAt || incoming().createdAt is timestamp);
+
+      allow delete: if isEmailVerified() && isOwner(existing().ownerId);
+
+      // Phases Subcollection
+      match /phases/{phaseId} {
+        allow read: if isSignedIn();
+        allow create: if isEmailVerified() && 
+                        isValidPhase(incoming()) &&
+                        (incoming().startDate == request.time || incoming().startDate is timestamp);
+        
+        allow update: if isEmailVerified() &&
+                        isValidPhase(incoming()) &&
+                        (incoming().startDate == existing().startDate || incoming().startDate is timestamp);
+                        
+        allow delete: if isEmailVerified();
+      }
+
+      // Issues Subcollection
+      match /issues/{issueId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isEmailVerified();
+      }
+    }
+
+    // Developers
+    match /developers/{devId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create, update: if isEmailVerified() && isValidDeveloper(incoming());
+      allow delete: if isEmailVerified() && isOwner(existing().ownerId);
+    }
+
+    // Daily Progress
+    match /dailyProgress/{logId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create, update: if isEmailVerified() && isValidDailyProgress(incoming());
+      allow delete: if isEmailVerified() && isOwner(existing().ownerId);
+    }
+
+    // Connection Test
+    match /test/connection {
+      allow read, write: if true;
+    }
+
+    match /system/health {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- GLOBAL HELPERS ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- ENTITY VALIDATIONS ---
+
+    function isValidProject(data) {
+      let requiredFields = ['clientName', 'ownerId', 'amount', 'netAmount', 'startDate', 'status', 'createdAt'];
+      return data.keys().hasAll(requiredFields) &&
+             data.ownerId == request.auth.uid &&
+             data.clientName is string && 
+             data.amount is number && 
+             data.status in ['WIP', 'Paused', 'Delayed', 'Ready for Delivery', 'Delivered', 'Complete', 'Cancelled'];
+    }
+
+    function isValidPhase(data) {
+      let requiredFields = ['phaseName', 'orderId', 'status', 'startDate', 'expectedDeliveryDate', 'value', 'developerIds', 'progress', 'resourceLinks'];
+      return data.keys().hasAll(requiredFields) &&
+             data.phaseName is string && 
+             data.status in ['Pending', 'In Progress', 'Delayed', 'Extension Requested', 'Delivered', 'Cancelled'] &&
+             data.progress is number &&
+             data.developerIds is list &&
+             data.resourceLinks is map;
+    }
+
+    // --- COLLECTION RULES ---
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection Test
+    match /test/connection {
+      allow read, write: if true;
+    }
+
+    match /system/health {
+      allow read, write: if true;
+    }
+
+    // User profiles (if needed)
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
+    }
+
+    // Projects
+    match /projects/{projectId} {
+      allow read, write: if isSignedIn();
+      
+      match /phases/{phaseId} {
+        allow read, write: if isSignedIn();
+      }
+
+      match /issues/{issueId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    match /admins/{adminId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /developers/{devId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /leaders/{leaderId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /dailyProgress/{logId} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}

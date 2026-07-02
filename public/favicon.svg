@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%">
+  <!-- Icon centered -->
+  <g fill="#0052ff">
+    <!-- Top-left triangle -->
+    <polygon points="24,0 48,0 24,24" />
+    <!-- Middle triangle -->
+    <polygon points="48,24 48,48 72,48" />
+    <!-- Main Body (Left square, Right bar, Hook) -->
+    <path d="M 24,48 L 48,48 L 48,72 L 72,96 L 72,24 L 96,24 L 96,96 L 72,120 L 24,72 Z" />
+    <!-- Star floating in top-right -->
+    <path d="M 96,0 Q 96,12 108,12 Q 96,12 96,24 Q 96,12 84,12 Q 96,12 96,0 Z" />
+  </g>
+</svg>

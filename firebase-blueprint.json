@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "A project document",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "amount": { "type": "number" },
+        "netAmount": { "type": "number" },
+        "startDate": { "type": "string" },
+        "status": { "type": "string" },
+        "shift": { "type": "string", "enum": ["Day", "Night"] },
+        "phases": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectId", "clientName", "ownerId", "amount", "netAmount", "startDate", "status", "shift", "phases", "createdAt"]
+    },
+    "Phase": {
+      "title": "Phase",
+      "description": "A phase within a project (Milestone)",
+      "type": "object",
+      "properties": {
+        "phaseName": { "type": "string" },
+        "orderId": { "type": "string" },
+        "status": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "expectedDeliveryDate": { "type": "string" },
+        "value": { "type": "number" },
+        "month": { "type": "string" },
+        "developerIds": { "type": "array" },
+        "kpiAllocations": { "type": "array" },
+        "progress": { "type": "number" },
+        "resourceLinks": { "type": "object" }
+      }
+    },
+    "Developer": {
+      "title": "Developer",
+      "description": "A developer document",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "designation": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "email": { "type": "string" },
+        "shift": { "type": "string", "enum": ["Day", "Night"] },
+        "maintenanceProjects": { "type": "array" }
+      }
+    },
+    "DailyProgress": {
+      "title": "DailyProgress",
+      "description": "A daily progress log",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "projectId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "developerId": { "type": "string" },
+        "description": { "type": "string" },
+        "dailyTarget": { "type": "string" },
+        "actualDone": { "type": "string" },
+        "progressPercentage": { "type": "number" },
+        "shift": { "type": "string", "enum": ["Day", "Night"] }
+      }
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": { "schema": "Project", "description": "Top-level projects" },
+    "/projects/{projectId}/phases/{phaseId}": { "schema": "Phase", "description": "Project phases" },
+    "/developers/{devId}": { "schema": "Developer", "description": "Developer registry" },
+    "/dailyProgress/{logId}": { "schema": "DailyProgress", "description": "Daily progress tracking" }
+  }
+}
