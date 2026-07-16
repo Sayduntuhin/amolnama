@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    image: jvai-management:latest
+    container_name: jvai-management
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./database.json:/app/dist/database.json
+      - ./database_backup.json:/app/dist/database_backup.json
+    env_file:
+      - .env

@@ -1,0 +1,22 @@
+{
+  "admins": [
+    {
+      "id": "admin-seed-sayduntuhin",
+      "name": "Saydun Nabi tuhin",
+      "email": "sayduntuhin.jvai@gmail.com",
+      "designation": "Administrator"
+    },
+    {
+      "id": "super-admin-id",
+      "name": "Super Admin",
+      "email": "exceptionhubjvai@gmail.com",
+      "designation": "Super Administrator"
+    }
+  ],
+  "developers": [],
+  "projects": [],
+  "dailyProgress": [],
+  "leaders": [],
+  "phases": [],
+  "issues": []
+}

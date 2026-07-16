@@ -110,32 +110,93 @@ export const AIAssistant: React.FC = () => {
 
     try {
       const context = await fetchContext();
-      const response = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input, context })
-      });
+      let aiReply = '';
 
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        console.error("Non-JSON response received:", text.substring(0, 200));
-        if (text.includes("Starting Server...") || text.includes("<html") || response.status === 502 || response.status === 503) {
-          throw new Error("The AI Assistant server is currently initializing or restarting. Please wait a few seconds and try sending your message again.");
+      try {
+        const token = localStorage.getItem('sprintdesk_session_token') || '';
+        const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+        const response = await fetch(`${API_BASE}/api/ai/chat`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ message: input, context })
+        });
+
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await response.text();
+          console.error("Non-JSON response received:", text.substring(0, 200));
+          if (text.includes("Starting Server...") || text.includes("<html") || response.status === 502 || response.status === 503 || response.status === 404) {
+            throw new Error("TriggerFallback");
+          }
+          throw new Error('Server returned an invalid response.');
         }
-        throw new Error('Server returned an invalid response. The API route might be temporarily unavailable or restarting.');
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.message || 'AI response failed');
+        }
+        aiReply = data.reply;
+      } catch (backendError: any) {
+        if (backendError.message === "TriggerFallback" || backendError.message.includes("failed to fetch") || backendError.name === "TypeError") {
+          const clientApiKey = (process.env.GEMINI_API_KEY || '').trim();
+          if (!clientApiKey) {
+            throw new Error("The AI Assistant server is currently unavailable and no client-side GEMINI_API_KEY is configured. Please make sure the backend server is running or configure the key in the .env file.");
+          }
+
+          console.log("Backend API chat unavailable (static hosting mode). Falling back to direct client-side Gemini API call...");
+          const { GoogleGenAI } = await import('@google/genai');
+          const ai = new GoogleGenAI({ apiKey: clientApiKey });
+          
+          const modelsToTry = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+          let responseText = '';
+          let lastError: any = null;
+
+          for (const modelName of modelsToTry) {
+            try {
+              console.log(`[Client Fallback] Attempting direct content generation with model: ${modelName}`);
+              const res = await ai.models.generateContent({
+                model: modelName,
+                contents: input,
+                config: {
+                  systemInstruction: `You are Sprint Desk AI, a specialized assistant for a project management dashboard. 
+                  You have access to the current application context (projects, developers, phases). 
+                  Your goal is to provide concise summaries and answer questions about the project data.
+                  Context: ${JSON.stringify(context)}
+                  Be professional, analytical, and helpful. Focus on providing actionable summaries of the data provided.
+                  ALWAYS use Markdown formatting for your responses:
+                  - Use **bold** for important values, amounts, or names
+                  - Use bullet points for lists of projects or developers
+                  - Use headers (minimal) or dividers if needed for long summaries
+                  - Format currency as $XX,XXX.XX`,
+                  temperature: 0.7,
+                },
+              });
+              if (res && res.text) {
+                responseText = res.text;
+                break;
+              }
+            } catch (err: any) {
+              console.warn(`[Client Fallback] Model ${modelName} failed:`, err.message || err);
+              lastError = err;
+            }
+          }
+
+          if (!responseText) {
+            throw lastError || new Error("Direct client-side generation failed.");
+          }
+          aiReply = responseText;
+        } else {
+          throw backendError;
+        }
       }
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'AI response failed');
-      }
-      
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: data.reply,
+        content: aiReply,
         timestamp: new Date()
       };
 

@@ -140,3 +140,16 @@ export interface Leader {
   uid?: string;
   createdAt: any;
 }
+
+export interface ProjectCredential {
+  id: string;
+  projectId: string;
+  title: string;
+  category: 'API Key' | 'Hosting/Server' | 'Database' | 'Repository' | 'Domain' | 'Other';
+  hostOrUrl?: string;
+  usernameOrKey?: string;
+  passwordOrSecret?: string;
+  notes?: string;
+  updatedAt: any;
+  updatedBy: string;
+}

@@ -134,5 +134,32 @@ export const adminService = {
     } catch (error) {
       console.error("[adminService] FAILED to update admin UID in database. This usually means your firestore.rules are blocking the write or not deployed yet:", error);
     }
+  },
+
+  async updateAdminName(id: string, email: string, name: string, designation?: string) {
+    try {
+      const emailLower = email.toLowerCase().trim();
+      const q = query(collection(db, COLLECTION_NAME), where('email', '==', emailLower));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        const existingDocId = querySnapshot.docs[0].id;
+        await updateDoc(doc(db, COLLECTION_NAME, existingDocId), {
+          name: name,
+          designation: designation || 'Administrator'
+        });
+        console.log(`[adminService] Successfully updated admin ${existingDocId} name to ${name}`);
+      } else {
+        const seed = defaultSeeds.find(s => s.email.toLowerCase() === emailLower);
+        const newDocRef = await addDoc(collection(db, COLLECTION_NAME), {
+          name: name,
+          email: emailLower,
+          designation: designation || seed?.designation || 'Administrator',
+          createdAt: serverTimestamp()
+        });
+        console.log(`[adminService] Created new admin document ${newDocRef.id} for seed ${email} with name ${name}`);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${COLLECTION_NAME}/${id}`);
+    }
   }
 };

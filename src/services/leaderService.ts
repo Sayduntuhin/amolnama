@@ -3,6 +3,7 @@ import {
   addDoc, 
   deleteDoc, 
   doc, 
+  getDoc,
   getDocs, 
   query, 
   where,
@@ -83,6 +84,62 @@ export const leaderService = {
     } catch (error) {
       console.warn(`Could not check if user ${emailLower} is a leader:`, error);
       return null;
+    }
+  },
+
+  async updateLeader(id: string, updatedData: { name: string; email: string; designation?: string }) {
+    try {
+      const emailLower = updatedData.email.toLowerCase().trim();
+      const leaderRef = doc(db, COLLECTION_NAME, id);
+      const leaderSnap = await getDoc(leaderRef);
+      if (!leaderSnap.exists()) {
+        throw new Error("Leader not found");
+      }
+      
+      const currentLeaderData = leaderSnap.data() as Leader;
+      const emailChanged = currentLeaderData.email.toLowerCase().trim() !== emailLower;
+      
+      const updatePayload: any = {
+        name: updatedData.name,
+        email: emailLower,
+        designation: updatedData.designation || 'Leader',
+      };
+      
+      if (emailChanged) {
+        const oldUid = currentLeaderData.uid;
+        if (oldUid) {
+          console.log(`[leaderService] Email changed for leader ${id}. Migrating assets from old UID ${oldUid} back to document ID ${id} before clearing UID.`);
+          
+          // Migrate Projects
+          const projQuery = query(collection(db, 'projects'), where('ownerId', '==', oldUid));
+          const projSnapshot = await getDocs(projQuery);
+          for (const projDoc of projSnapshot.docs) {
+            await updateDoc(doc(db, 'projects', projDoc.id), { ownerId: id });
+          }
+          
+          // Migrate Developers
+          const devQuery = query(collection(db, 'developers'), where('ownerId', '==', oldUid));
+          const devSnapshot = await getDocs(devQuery);
+          for (const devDoc of devSnapshot.docs) {
+            await updateDoc(doc(db, 'developers', devDoc.id), { ownerId: id });
+          }
+          
+          // Migrate Daily Progress logs
+          const logQuery = query(collection(db, 'dailyProgress'), where('ownerId', '==', oldUid));
+          const logSnapshot = await getDocs(logQuery);
+          for (const logDoc of logSnapshot.docs) {
+            await updateDoc(doc(db, 'dailyProgress', logDoc.id), { ownerId: id });
+          }
+        }
+        
+        // Clear the UID so the new user registers and links their new UID on first login
+        updatePayload.uid = "";
+      }
+      
+      await updateDoc(leaderRef, updatePayload);
+      console.log(`[leaderService] Successfully updated leader ${id} information.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${COLLECTION_NAME}/${id}`);
     }
   },
 

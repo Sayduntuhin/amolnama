@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Trash2, Mail, Shield, User, Loader2, Search, X } from 'lucide-react';
+import { Plus, Trash2, Mail, Shield, User, Loader2, Search, X, Edit } from 'lucide-react';
 import { adminService } from '@/src/services/adminService';
 import { cn } from '@/src/lib/utils';
 import { useSnackbar } from '@/src/components/Snackbar';
@@ -10,6 +10,8 @@ export function AdminList() {
   const [admins, setAdmins] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedAdminToEdit, setSelectedAdminToEdit] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -127,7 +129,7 @@ export function AdminList() {
                   </div>
 
                   <div className="flex flex-col items-center mb-4 pt-2">
-                    <div className="w-14 h-14 bg-indigo-650 rounded-2xl flex items-center justify-center text-white text-lg font-black mb-3 shadow-xl shadow-indigo-650/20 ring-4 ring-indigo-50 group-hover:bg-slate-900 group-hover:ring-slate-100 transition-all">
+                    <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center text-white text-lg font-black mb-3 shadow-xl shadow-indigo-600/20 ring-4 ring-indigo-50 group-hover:bg-slate-900 group-hover:ring-slate-100 transition-all">
                       <Shield className="w-6 h-6 text-white" />
                     </div>
                     <h3 className="font-black text-slate-900 text-center tracking-tight text-lg leading-tight">{admin.name}</h3>
@@ -148,18 +150,32 @@ export function AdminList() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => handleDeleteAdmin(admin.id, admin.email)}
-                    disabled={
-                      admin.email === 'sayduntuhin.jvai@gmail.com' || 
-                      admin.email === 'exceptionhubjvai@gmail.com' || 
-                      isSubmitting
-                    }
-                    className="w-full py-3 bg-slate-50 text-slate-400 rounded-xl hover:bg-rose-50 hover:text-rose-600 hover:border-rose-150 border border-transparent transition-all flex items-center justify-center gap-2 font-black text-[9px] uppercase tracking-widest disabled:opacity-30 disabled:hover:bg-slate-50 disabled:hover:text-slate-400 disabled:hover:border-transparent active:scale-95 shadow-sm"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Revoke Access</span>
-                  </button>
+                  <div className="flex gap-2 w-full mt-auto">
+                    <button
+                      onClick={() => {
+                        setSelectedAdminToEdit(admin);
+                        setIsEditModalOpen(true);
+                      }}
+                      disabled={isSubmitting}
+                      className="flex-1 py-3 bg-slate-50 text-slate-600 rounded-xl hover:bg-indigo-50 hover:text-indigo-600 border border-transparent hover:border-indigo-100 transition-all flex items-center justify-center gap-2 font-black text-[9px] uppercase tracking-widest active:scale-95 shadow-sm"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      <span>Edit Name</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteAdmin(admin.id, admin.email)}
+                      disabled={
+                        admin.email === 'sayduntuhin.jvai@gmail.com' || 
+                        admin.email === 'exceptionhubjvai@gmail.com' || 
+                        isSubmitting
+                      }
+                      className="flex-1 py-3 bg-slate-50 text-slate-400 rounded-xl hover:bg-rose-50 hover:text-rose-600 hover:border-rose-150 border border-transparent transition-all flex items-center justify-center gap-2 font-black text-[9px] uppercase tracking-widest disabled:opacity-30 disabled:hover:bg-slate-50 disabled:hover:text-slate-400 disabled:hover:border-transparent active:scale-95 shadow-sm"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Revoke</span>
+                    </button>
+                  </div>
                 </motion.div>
               ))}
             </AnimatePresence>
@@ -220,6 +236,101 @@ export function AdminList() {
                   <button type="button" onClick={() => setIsModalOpen(false)} disabled={isSubmitting} className="flex-1 py-3 text-slate-500 font-bold text-sm rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50">Cancel</button>
                   <button type="submit" disabled={isSubmitting} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50">
                     {isSubmitting ? 'Creating...' : 'Register Administrator'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Admin Modal */}
+      <AnimatePresence>
+        {isEditModalOpen && selectedAdminToEdit && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }} 
+              animate={{ opacity: 1, scale: 1, y: 0 }} 
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-white/20 max-h-[95vh] flex flex-col"
+            >
+              <div className="p-6 sm:p-8 border-b border-slate-100 bg-slate-50/50">
+                <h2 className="text-xl font-bold text-slate-900 tracking-tight">Edit Administrator</h2>
+                <p className="text-slate-500 text-xs font-medium uppercase tracking-widest mt-1">Modify security credentials</p>
+              </div>
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                if (isSubmitting) return;
+                setIsSubmitting(true);
+                try {
+                  const f = e.target as any;
+                  const newName = f.name.value;
+                  const newDesignation = f.designation.value;
+
+                  await adminService.updateAdminName(
+                    selectedAdminToEdit.id,
+                    selectedAdminToEdit.email,
+                    newName,
+                    newDesignation
+                  );
+                  showSuccess('Administrator details updated successfully.');
+                  setIsEditModalOpen(false);
+                  setSelectedAdminToEdit(null);
+                  fetchAdmins();
+                } catch (err: any) {
+                  console.error(err);
+                  showError('Failed to update Administrator: ' + (err.message || 'unknown error'));
+                } finally {
+                  setIsSubmitting(false);
+                }
+              }} className="p-6 sm:p-8 space-y-5 overflow-y-auto no-scrollbar">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Email Address (Non-editable)</label>
+                  <input 
+                    type="email" 
+                    disabled 
+                    className="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl font-medium text-sm text-slate-500 cursor-not-allowed" 
+                    value={selectedAdminToEdit.email} 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Full Name</label>
+                  <input 
+                    name="name" 
+                    required 
+                    defaultValue={selectedAdminToEdit.name} 
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm" 
+                    placeholder="e.g. Sarah Jenkins" 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Designation</label>
+                  <input 
+                    name="designation" 
+                    required 
+                    defaultValue={selectedAdminToEdit.designation || 'Administrator'} 
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm" 
+                    placeholder="e.g. Delivery Lead" 
+                  />
+                </div>
+                <div className="flex gap-3 pt-6">
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setIsEditModalOpen(false);
+                      setSelectedAdminToEdit(null);
+                    }} 
+                    disabled={isSubmitting} 
+                    className="flex-1 py-3 text-slate-500 font-bold text-sm rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={isSubmitting} 
+                    className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
               </form>

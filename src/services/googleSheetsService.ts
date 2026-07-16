@@ -33,7 +33,8 @@ const VALID_PHASE_NAMES: PhaseName[] = [
   'AI',
   'Deployment',
   'Integration',
-  'Full Project'
+  'Full Project',
+  'n8n',
 ];
 
 /**
@@ -41,7 +42,7 @@ const VALID_PHASE_NAMES: PhaseName[] = [
  */
 function parsePhases(phasesStr: string): PhaseName[] {
   if (!phasesStr) return ['UI/UX'];
-  
+
   return phasesStr
     .split(',')
     .map(p => p.trim())
@@ -50,7 +51,7 @@ function parsePhases(phasesStr: string): PhaseName[] {
         valid => valid.toLowerCase() === p.toLowerCase()
       );
       if (match) return match;
-      
+
       // Partial matches
       if (p.toLowerCase().includes('frontend')) {
         if (p.toLowerCase().includes('app') || p.toLowerCase().includes('mobile')) {
@@ -73,7 +74,7 @@ function parsePhases(phasesStr: string): PhaseName[] {
       if (p.toLowerCase().includes('integrat')) {
         return 'Integration';
       }
-      
+
       return 'Full Project' as PhaseName;
     });
 }
@@ -200,7 +201,7 @@ export const googleSheetsService = {
       // Parse fields safely
       const amount = parseFloat(amountRaw.replace(/[^0-9.-]+/g, '')) || 0;
       let startDate = startDateRaw.trim() || new Date().toISOString().split('T')[0];
-      
+
       // Simple date normalizer to YYYY-MM-DD if in format MM/DD/YYYY
       if (startDate.includes('/')) {
         const parts = startDate.split('/');

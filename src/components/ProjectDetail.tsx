@@ -22,14 +22,27 @@ import {
   ChevronDown,
   ChevronUp,
   Target,
-  FileText
+  FileText,
+  Key,
+  Lock,
+  Unlock,
+  Copy,
+  Eye,
+  EyeOff,
+  ShieldAlert,
+  Check,
+  Server,
+  Database,
+  Globe,
+  GitBranch
 } from 'lucide-react';
 import { projectService } from '@/src/services/projectService';
 import { progressService } from '@/src/services/progressService';
 import { developerService } from '@/src/services/developerService';
 import { leaderService } from '@/src/services/leaderService';
+import { credentialService } from '@/src/services/credentialService';
 import { auth } from '@/src/lib/firebase';
-import { Project, PhaseTracking, DailyProgress, Issue, Developer, PhaseStatus, PhaseName, ProjectStatus, KPIAllocation, Shift, Leader } from '@/src/types';
+import { Project, PhaseTracking, DailyProgress, Issue, Developer, PhaseStatus, PhaseName, ProjectStatus, KPIAllocation, Shift, Leader, ProjectCredential } from '@/src/types';
 import { formatDate, calculateProjectAge, calculateAge, formatDateForInput, cn, resolvePhaseStatus, resolveProjectStatus, calcOverallProgress, getGMT6Date, getGMT6DateString } from '@/src/lib/utils';
 import { useSnackbar } from '@/src/components/Snackbar';
 import { motion, AnimatePresence } from 'motion/react';
@@ -62,8 +75,22 @@ export function ProjectDetail() {
   const [isSettingDeliveryDate, setIsSettingDeliveryDate] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<ProjectStatus | null>(null);
   const [deliveryDate, setLocalDeliveryDate] = useState(getGMT6DateString());
-  const [activeTab, setActiveTab] = useState<'phases' | 'progress' | 'issues'>('phases');
+  const [activeTab, setActiveTab] = useState<'phases' | 'progress' | 'issues' | 'credentials'>('phases');
+  const [credentials, setCredentials] = useState<ProjectCredential[]>([]);
+  const [isAddingCredential, setIsAddingCredential] = useState(false);
+  const [editingCredential, setEditingCredential] = useState<ProjectCredential | null>(null);
+  const [credentialFormData, setCredentialFormData] = useState({
+    title: '',
+    category: 'API Key' as 'API Key' | 'Hosting/Server' | 'Database' | 'Repository' | 'Domain' | 'Other',
+    hostOrUrl: '',
+    usernameOrKey: '',
+    passwordOrSecret: '',
+    notes: ''
+  });
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectedCredentialCategory, setSelectedCredentialCategory] = useState<string>('All');
   const [isEditingProject, setIsEditingProject] = useState(false);
   const [projectEditData, setProjectEditData] = useState({
     clientName: '',
@@ -100,13 +127,14 @@ export function ProjectDetail() {
     if (logs.length === 0) setLoading(true); // Only show full loading if it's the first load
     
     try {
-      const [p, ph, l, i, devs, leadersList] = await Promise.all([
+      const [p, ph, l, i, devs, leadersList, creds] = await Promise.all([
         projectService.getProjectById(id),
         progressService.getPhases(id),
         progressService.getDailyProgress(id),
         progressService.getIssues(id),
         developerService.getAllDevelopers(),
-        leaderService.getAllLeaders()
+        leaderService.getAllLeaders(),
+        credentialService.getCredentials(id)
       ]);
       
       if (p) {
@@ -116,6 +144,7 @@ export function ProjectDetail() {
         setIssues(i || []);
         setDevelopers(devs || []);
         setLeaders(leadersList || []);
+        setCredentials(creds || []);
         
         // Auto-backfill missing logs - DISABLED to only display what developers explicitly add
         // if (ph && ph.length > 0) {
@@ -250,7 +279,7 @@ export function ProjectDetail() {
 
   const autoStatus = calculateAutoStatus();
   
-  const activePhases = phases.filter(ph => ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested');
+  const activePhases = phases.filter(ph => ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested' || ph.status === 'Ready for Delivery');
   const avgMilestoneAge = activePhases.length > 0
     ? Math.round(activePhases.reduce((acc, ph) => acc + calculateProjectAge(ph.startDate || (ph as any).createdAt || ''), 0) / activePhases.length)
     : 0;
@@ -317,6 +346,13 @@ export function ProjectDetail() {
 
     if (newStatus === 'Delivered' || newStatus === 'Complete') {
       setPendingStatus(newStatus);
+      const deliveredPhases = phases.filter(p => p.status === 'Delivered' && p.endDate);
+      if (deliveredPhases.length > 0) {
+        const sorted = [...deliveredPhases].sort((a, b) => b.endDate!.localeCompare(a.endDate!));
+        setLocalDeliveryDate(sorted[0].endDate!);
+      } else {
+        setLocalDeliveryDate(getGMT6DateString());
+      }
       setIsSettingDeliveryDate(true);
       return;
     }
@@ -348,6 +384,68 @@ export function ProjectDetail() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCredentialSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || isSubmitting) return;
+    setIsSubmitting(true);
+    
+    const userDisplay = auth.currentUser?.displayName || auth.currentUser?.email || 'System';
+    const payload = {
+      ...credentialFormData,
+      projectId: id,
+      updatedBy: userDisplay
+    };
+    
+    try {
+      if (editingCredential) {
+        await credentialService.updateCredential(id, editingCredential.id, payload);
+        showSuccess('Credential updated successfully.');
+      } else {
+        await credentialService.addCredential(id, payload);
+        showSuccess('Credential registered successfully.');
+      }
+      setIsAddingCredential(false);
+      setEditingCredential(null);
+      setCredentialFormData({
+        title: '',
+        category: 'API Key',
+        hostOrUrl: '',
+        usernameOrKey: '',
+        passwordOrSecret: '',
+        notes: ''
+      });
+      await loadData();
+    } catch (error: any) {
+      console.error('Failed to save credential:', error);
+      showError(error.message || 'Failed to save credential.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCredentialDelete = async (credentialId: string) => {
+    if (!id || isSubmitting) return;
+    if (window.confirm('Delete this credential? This action is irreversible.')) {
+      setIsSubmitting(true);
+      try {
+        await credentialService.deleteCredential(id, credentialId);
+        showSuccess('Credential deleted successfully.');
+        await loadData();
+      } catch (error) {
+        console.error(error);
+        showError('Failed to delete credential.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  const handleCopyText = (text: string, keyId: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(keyId);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const filteredLogs = logs
@@ -496,6 +594,7 @@ export function ProjectDetail() {
             { id: 'phases', label: 'Milestones', icon: CheckCircle2 },
             { id: 'progress', label: 'Activity Hub', icon: History },
             { id: 'issues', label: 'Issue Tracker', icon: MessageSquare },
+            { id: 'credentials', label: 'Credentials', icon: Key },
           ].map(tab => (
             <button
               key={tab.id}
@@ -520,6 +619,27 @@ export function ProjectDetail() {
           >
             <Plus className="w-5 h-5" />
             <span>Add Milestone</span>
+          </button>
+        )}
+
+        {activeTab === 'credentials' && (
+          <button
+            onClick={() => {
+              setCredentialFormData({
+                title: '',
+                category: 'API Key',
+                hostOrUrl: '',
+                usernameOrKey: '',
+                passwordOrSecret: '',
+                notes: ''
+              });
+              setEditingCredential(null);
+              setIsAddingCredential(true);
+            }}
+            className="flex items-center justify-center gap-3 bg-emerald-600 text-white px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-500/20 active:scale-95 w-full lg:w-auto"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Add Credential</span>
           </button>
         )}
       </div>
@@ -805,6 +925,251 @@ export function ProjectDetail() {
             </div>
           </div>
         )}
+
+        {activeTab === 'credentials' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
+                  <div className="w-2 h-8 bg-emerald-600 rounded-full" />
+                  Credentials & Client Provided Assets
+                </h3>
+                <p className="text-slate-500 text-xs font-semibold mt-1">Manage api keys, server logins, and database credentials securely.</p>
+              </div>
+              {credentials.length > 0 && (
+                <button
+                  onClick={() => {
+                    setCredentialFormData({
+                      title: '',
+                      category: 'API Key',
+                      hostOrUrl: '',
+                      usernameOrKey: '',
+                      passwordOrSecret: '',
+                      notes: ''
+                    });
+                    setEditingCredential(null);
+                    setIsAddingCredential(true);
+                  }}
+                  className="px-4 py-2 text-[10px] font-bold text-white bg-emerald-605 bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all shadow-lg shadow-emerald-500/20 uppercase tracking-widest active:scale-95 whitespace-nowrap cursor-pointer shrink-0 self-start sm:self-center"
+                >
+                  Add Credential
+                </button>
+              )}
+            </div>
+
+            {/* Category Filter Pills */}
+            {credentials.length > 0 && (
+              <div className="flex gap-2 pb-2 overflow-x-auto no-scrollbar border-b border-slate-100">
+                {['All', 'API Key', 'Hosting/Server', 'Database', 'Repository', 'Domain', 'Other'].map(cat => {
+                  const isActive = selectedCredentialCategory === cat;
+                  const count = cat === 'All' ? credentials.length : credentials.filter(c => c.category === cat).length;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCredentialCategory(cat)}
+                      className={cn(
+                        "px-4 py-2 text-[9px] font-black uppercase tracking-widest rounded-xl border transition-all cursor-pointer whitespace-nowrap active:scale-95 flex items-center gap-1.5",
+                        isActive
+                          ? "bg-slate-900 border-slate-900 text-white shadow-md shadow-slate-900/10"
+                          : "bg-white border-slate-200 text-slate-500 hover:text-slate-800 hover:border-slate-350"
+                      )}
+                    >
+                      <span>{cat}</span>
+                      <span className={cn(
+                        "text-[8px] font-black font-mono px-1.5 py-0.2 rounded-md shrink-0",
+                        isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                      )}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {credentials.length === 0 ? (
+              <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2.5rem] py-20 text-center">
+                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100 shadow-inner">
+                  <Key className="w-8 h-8 text-slate-300" />
+                </div>
+                <p className="text-slate-400 font-black uppercase tracking-[0.2em] text-[10px]">No credentials saved yet</p>
+                <p className="text-slate-400 text-xs mt-2 max-w-sm mx-auto font-medium mb-6">Add secure host details, logins, database keys, or API tokens provided by the client.</p>
+                <button
+                  onClick={() => {
+                    setCredentialFormData({
+                      title: '',
+                      category: 'API Key',
+                      hostOrUrl: '',
+                      usernameOrKey: '',
+                      passwordOrSecret: '',
+                      notes: ''
+                    });
+                    setEditingCredential(null);
+                    setIsAddingCredential(true);
+                  }}
+                  className="px-6 py-3 text-[10px] font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-all shadow-lg uppercase tracking-widest active:scale-95 cursor-pointer"
+                >
+                  Register First Key
+                </button>
+              </div>
+            ) : credentials.filter(c => selectedCredentialCategory === 'All' || c.category === selectedCredentialCategory).length === 0 ? (
+              <div className="bg-white border border-slate-150 rounded-[2.5rem] py-16 text-center shadow-sm">
+                <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100 shadow-inner">
+                  <ShieldAlert className="w-6 h-6 text-slate-300" />
+                </div>
+                <p className="text-slate-400 font-black uppercase tracking-[0.2em] text-[10px]">No matches</p>
+                <p className="text-slate-400 text-xs mt-2 max-w-xs mx-auto font-medium">There are no project credentials saved in the category "{selectedCredentialCategory}".</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {credentials
+                  .filter(c => selectedCredentialCategory === 'All' || c.category === selectedCredentialCategory)
+                  .map(cred => {
+                    const isVisible = showSecrets[cred.id] || false;
+                    const isCopied = copiedId === cred.id;
+                    
+                    const categoryStyles = {
+                      'API Key': 'bg-violet-50 text-violet-750 border-violet-100',
+                      'Hosting/Server': 'bg-rose-50 text-rose-750 border-rose-100',
+                      'Database': 'bg-emerald-50 text-emerald-750 border-emerald-100',
+                      'Repository': 'bg-blue-50 text-blue-755 border-blue-100',
+                      'Domain': 'bg-amber-50 text-amber-750 border-amber-100',
+                      'Other': 'bg-slate-50 text-slate-750 border-slate-100',
+                    };
+
+                    const getCategoryIcon = (category: string) => {
+                      switch (category) {
+                        case 'API Key': return <Key className="w-4 h-4 text-violet-650" />;
+                        case 'Hosting/Server': return <Server className="w-4 h-4 text-rose-650" />;
+                        case 'Database': return <Database className="w-4 h-4 text-emerald-655" />;
+                        case 'Repository': return <GitBranch className="w-4 h-4 text-blue-650" />;
+                        case 'Domain': return <Globe className="w-4 h-4 text-amber-650" />;
+                        default: return <ShieldAlert className="w-4 h-4 text-slate-600" />;
+                      }
+                    };
+                    
+                    return (
+                      <div key={cred.id} className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 hover:shadow-xl hover:border-emerald-250 transition-all flex flex-col justify-between relative overflow-hidden group min-h-[220px]">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-emerald-650 bg-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <div>
+                          {/* Header Details */}
+                          <div className="flex items-center justify-between gap-3 mb-4">
+                            <span className={cn("text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg border flex items-center gap-1.5", categoryStyles[cred.category] || categoryStyles['Other'])}>
+                              {getCategoryIcon(cred.category)}
+                              <span>{cred.category}</span>
+                            </span>
+                            <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => {
+                                  setCredentialFormData({
+                                    title: cred.title,
+                                    category: cred.category,
+                                    hostOrUrl: cred.hostOrUrl || '',
+                                    usernameOrKey: cred.usernameOrKey || '',
+                                    passwordOrSecret: cred.passwordOrSecret || '',
+                                    notes: cred.notes || ''
+                                  });
+                                  setEditingCredential(cred);
+                                  setIsAddingCredential(true);
+                                }}
+                                className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded-lg transition-all cursor-pointer"
+                                title="Edit"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleCredentialDelete(cred.id)}
+                                className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-all cursor-pointer"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Title */}
+                          <h4 className="text-base font-black text-slate-900 mb-4 line-clamp-1">{cred.title}</h4>
+
+                          {/* Stacks */}
+                          <div className="space-y-3.5 mb-5 text-xs text-slate-650">
+                            {cred.hostOrUrl && (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Host / URL</span>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-slate-700 truncate pr-2">{cred.hostOrUrl}</span>
+                                  {cred.hostOrUrl.startsWith('http') && (
+                                    <a href={cred.hostOrUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:text-indigo-700 transition-colors shrink-0">
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {cred.usernameOrKey && (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Username / Key</span>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-150 text-slate-700 truncate pr-2 font-bold">{cred.usernameOrKey}</span>
+                                  <button
+                                    onClick={() => handleCopyText(cred.usernameOrKey || '', cred.id + '_username')}
+                                    className="text-slate-400 hover:text-indigo-600 transition-colors p-1 hover:bg-slate-50 rounded shrink-0 cursor-pointer"
+                                    title="Copy"
+                                  >
+                                    {copiedId === (cred.id + '_username') ? <Check className="w-3.5 h-3.5 text-emerald-600 animate-pulse" /> : <Copy className="w-3.5 h-3.5" />}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {cred.passwordOrSecret && (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Password / Secret</span>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-150 text-slate-700 truncate pr-2 font-bold">
+                                    {isVisible ? cred.passwordOrSecret : '••••••••••••'}
+                                  </span>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      onClick={() => setShowSecrets(prev => ({ ...prev, [cred.id]: !isVisible }))}
+                                      className="text-slate-400 hover:text-indigo-600 transition-colors p-1 hover:bg-slate-50 rounded cursor-pointer"
+                                      title={isVisible ? "Hide" : "Show"}
+                                    >
+                                      {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                    </button>
+                                    <button
+                                      onClick={() => handleCopyText(cred.passwordOrSecret || '', cred.id + '_pwd')}
+                                      className="text-slate-400 hover:text-indigo-600 transition-colors p-1 hover:bg-slate-50 rounded cursor-pointer"
+                                      title="Copy"
+                                    >
+                                      {copiedId === (cred.id + '_pwd') ? <Check className="w-3.5 h-3.5 text-emerald-600 animate-pulse" /> : <Copy className="w-3.5 h-3.5" />}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {cred.notes && (
+                              <div className="flex flex-col gap-0.5 pt-2 border-t border-slate-100">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Notes</span>
+                                <p className="text-slate-500 leading-relaxed italic pr-2 text-[11px] font-medium">{cred.notes}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Footer Details */}
+                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pt-3 border-t border-slate-100 flex items-center justify-between">
+                          <span>By: {cred.updatedBy}</span>
+                          {cred.updatedAt && (
+                            <span>{formatDate(cred.updatedAt)}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -824,6 +1189,133 @@ export function ProjectDetail() {
             </motion.div>
           </div>
         )}
+
+        {isAddingCredential && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[70] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[2rem] w-full max-w-xl shadow-2xl p-8 border border-slate-100"
+            >
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2.5 tracking-tight uppercase text-base">
+                  <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center border border-emerald-100 text-emerald-600">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  {editingCredential ? 'Modify Credential' : 'Register Credential'}
+                </h3>
+                <button
+                  onClick={() => {
+                    setIsAddingCredential(false);
+                    setEditingCredential(null);
+                  }}
+                  className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-650 rounded-xl transition-all cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              <form onSubmit={handleCredentialSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Title / Label *</label>
+                  <input
+                    required
+                    type="text"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                    placeholder="e.g. Staging DB credentials, Figma Design Link"
+                    value={credentialFormData.title}
+                    onChange={(e) => setCredentialFormData({ ...credentialFormData, title: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Category *</label>
+                    <select
+                      required
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-slate-700 appearance-none bg-white"
+                      value={credentialFormData.category}
+                      onChange={(e) => setCredentialFormData({ ...credentialFormData, category: e.target.value as any })}
+                    >
+                      <option value="API Key">API Key</option>
+                      <option value="Hosting/Server">Hosting / Server</option>
+                      <option value="Database">Database</option>
+                      <option value="Repository">Repository</option>
+                      <option value="Domain">Domain</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Host / URL (Optional)</label>
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                      placeholder="e.g. 192.168.1.1 or https://..."
+                      value={credentialFormData.hostOrUrl}
+                      onChange={(e) => setCredentialFormData({ ...credentialFormData, hostOrUrl: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Username / Key</label>
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                      placeholder="e.g. admin or access_key_id"
+                      value={credentialFormData.usernameOrKey}
+                      onChange={(e) => setCredentialFormData({ ...credentialFormData, usernameOrKey: e.target.value })}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Password / Secret Key</label>
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                      placeholder="e.g. pass123 or secret_key"
+                      value={credentialFormData.passwordOrSecret}
+                      onChange={(e) => setCredentialFormData({ ...credentialFormData, passwordOrSecret: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Notes / Special Instructions</label>
+                  <textarea
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium h-24 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all resize-none"
+                    placeholder="e.g. VPN required, use staging profile..."
+                    value={credentialFormData.notes}
+                    onChange={(e) => setCredentialFormData({ ...credentialFormData, notes: e.target.value })}
+                  />
+                </div>
+
+                <div className="flex gap-4 pt-4 border-t border-slate-100 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingCredential(false);
+                      setEditingCredential(null);
+                    }}
+                    className="flex-1 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 font-bold rounded-2xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSubmitting ? 'Saving...' : editingCredential ? 'Update' : 'Register'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        ) }
 
         {isSettingDeliveryDate && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[70] flex items-center justify-center p-4">
@@ -1627,6 +2119,10 @@ function PhaseCard({ phase, developers, onUpdate, projectId, project, onManageKP
     try {
       const updatedData = { ...formData };
       
+      if (updatedData.status === 'Delivered') {
+        updatedData.endDate = updatedData.startDate;
+      }
+      
       // Clean up records for any developer that has been unassigned from developerIds
       if (updatedData.developerIds) {
         // Clean up developerProgress mapping
@@ -1811,11 +2307,11 @@ function PhaseCard({ phase, developers, onUpdate, projectId, project, onManageKP
           )}
 
           {/* Links - Only show if they exist */}
-          {Object.entries(phase.resourceLinks).some(([_, value]) => !!value) && (
+          {phase.resourceLinks && Object.entries(phase.resourceLinks).some(([_, value]) => !!value) && (
             <div className="space-y-3">
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Documentation Assets</p>
               <div className="grid grid-cols-2 gap-3">
-                {Object.entries(phase.resourceLinks).map(([key, value]) => (
+                {Object.entries(phase.resourceLinks || {}).map(([key, value]) => (
                   value && (
                     <a key={key} href={value} target="_blank" rel="noreferrer" className="flex items-center justify-between p-3.5 bg-white rounded-2xl border border-slate-100 hover:bg-slate-900 hover:text-white transition-all group/link shadow-sm active:scale-95">
                       <span className="text-[10px] font-bold uppercase tracking-widest">{key}</span>
@@ -2066,10 +2562,20 @@ function PhaseCard({ phase, developers, onUpdate, projectId, project, onManageKP
                     <select 
                       className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none hover:border-slate-300 transition-colors"
                       value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                      onChange={(e) => {
+                        const newStatus = e.target.value as any;
+                        if (newStatus === 'Delivered') {
+                          setFormData({ ...formData, status: newStatus, endDate: formData.startDate });
+                        } else {
+                          setFormData({ ...formData, status: newStatus });
+                        }
+                      }}
                     >
                       <option value="Pending">Pending</option>
                       <option value="In Progress">In Progress</option>
+                      <option value="Delayed">Delayed</option>
+                      <option value="Extension Requested">Extension Requested</option>
+                      <option value="Ready for Delivery">Ready for Delivery</option>
                       <option value="Delivered">Delivered</option>
                       <option value="Cancelled">Cancelled</option>
                     </select>

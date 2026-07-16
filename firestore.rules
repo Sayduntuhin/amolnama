@@ -11,6 +11,10 @@ service cloud.firestore {
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
+
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email.toLowerCase() == 'exceptionhubjvai@gmail.com';
+    }
     
     function incoming() {
       return request.resource.data;
@@ -48,7 +52,7 @@ service cloud.firestore {
     // --- COLLECTION RULES ---
 
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if isSuperAdmin();
     }
 
     // Connection Test

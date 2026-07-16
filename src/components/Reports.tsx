@@ -128,17 +128,16 @@ export function Reports() {
         const superAdminUid = auth.currentUser?.uid;
         const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
         let adminUid = selectedAdmin?.uid;
-        if (selectedAdmin?.email?.toLowerCase().trim() === 'exceptionhubjvai@gmail.com') {
+        if (selectedAdmin?.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
           adminUid = superAdminUid;
         }
-        if (adminUid) {
-          temp = temp.filter(p => p.ownerId === adminUid);
-        } else if (selectedAdmin?.email?.toLowerCase().trim() === 'sayduntuhin.jvai@gmail.com') {
-          const otherAdminUids = admins
-            .filter(a => (a.uid || a.id) !== selectedAdminFilter && a.uid)
-            .map(a => a.uid);
-          temp = temp.filter(p => p.ownerId !== superAdminUid && !otherAdminUids.includes(p.ownerId));
-        }
+        const targetOwnerId = adminUid || selectedAdmin?.id;
+        
+        const adminLeaders = leaders.filter(l => l.creatorId === targetOwnerId);
+        const leaderUids = adminLeaders.map(l => l.uid).filter(Boolean);
+        const leaderIds = adminLeaders.map(l => l.id);
+        
+        temp = temp.filter(p => p.ownerId === targetOwnerId || leaderUids.includes(p.ownerId) || leaderIds.includes(p.ownerId));
       }
       if (selectedLeaderFilter !== 'All') {
         const selectedLeader = leaders.find(l => (l.uid || l.id) === selectedLeaderFilter);
@@ -180,17 +179,16 @@ export function Reports() {
         const superAdminUid = auth.currentUser?.uid;
         const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
         let adminUid = selectedAdmin?.uid;
-        if (selectedAdmin?.email?.toLowerCase().trim() === 'exceptionhubjvai@gmail.com') {
+        if (selectedAdmin?.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
           adminUid = superAdminUid;
         }
-        if (adminUid) {
-          temp = temp.filter(d => d.ownerId === adminUid);
-        } else if (selectedAdmin?.email?.toLowerCase().trim() === 'sayduntuhin.jvai@gmail.com') {
-          const otherAdminUids = admins
-            .filter(a => (a.uid || a.id) !== selectedAdminFilter && a.uid)
-            .map(a => a.uid);
-          temp = temp.filter(d => d.ownerId !== superAdminUid && !otherAdminUids.includes(d.ownerId));
-        }
+        const targetOwnerId = adminUid || selectedAdmin?.id;
+        
+        const adminLeaders = leaders.filter(l => l.creatorId === targetOwnerId);
+        const leaderUids = adminLeaders.map(l => l.uid).filter(Boolean);
+        const leaderIds = adminLeaders.map(l => l.id);
+        
+        temp = temp.filter(d => d.ownerId === targetOwnerId || leaderUids.includes(d.ownerId) || leaderIds.includes(d.ownerId));
       }
       if (selectedLeaderFilter !== 'All') {
         const selectedLeader = leaders.find(l => (l.uid || l.id) === selectedLeaderFilter);
@@ -220,6 +218,40 @@ export function Reports() {
       return [];
     }
   }, [developers, selectedAdminFilter, selectedLeaderFilter, isSuperAdmin, currentLeader, admins, leaders]);
+
+  const visibleLeaders = React.useMemo(() => {
+    if (!isSuperAdmin || selectedAdminFilter === 'All') {
+      return leaders;
+    }
+    const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
+    if (!selectedAdmin) return [];
+    
+    const superAdminUid = auth.currentUser?.uid;
+    let adminUid = selectedAdmin.uid;
+    if (selectedAdmin.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
+      adminUid = superAdminUid;
+    }
+    const targetOwnerId = adminUid || selectedAdmin.id;
+    return leaders.filter(l => l.creatorId === targetOwnerId);
+  }, [leaders, isSuperAdmin, selectedAdminFilter, admins]);
+
+  useEffect(() => {
+    if (isSuperAdmin && selectedAdminFilter !== 'All' && selectedLeaderFilter !== 'All') {
+      const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
+      if (selectedAdmin) {
+        const superAdminUid = auth.currentUser?.uid;
+        let adminUid = selectedAdmin.uid;
+        if (selectedAdmin.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
+          adminUid = superAdminUid;
+        }
+        const targetOwnerId = adminUid || selectedAdmin.id;
+        const belongsToSelectedAdmin = leaders.some(l => (l.uid || l.id) === selectedLeaderFilter && l.creatorId === targetOwnerId);
+        if (!belongsToSelectedAdmin) {
+          setSelectedLeaderFilter('All');
+        }
+      }
+    }
+  }, [selectedAdminFilter, isSuperAdmin, admins, leaders, selectedLeaderFilter]);
 
   const adminFilteredPhases = React.useMemo(() => {
     const allowedProjIds = new Set(adminFilteredProjects.map(p => p.id));
@@ -554,7 +586,7 @@ export function Reports() {
                 ) : (
                   <option value="All">All Leaders</option>
                 )}
-                {leaders.map(leader => (
+                {visibleLeaders.map(leader => (
                   <option key={leader.id} value={leader.uid || leader.id}>{leader.name}</option>
                 ))}
               </select>
@@ -659,7 +691,7 @@ export function Reports() {
                 ) : (
                   <option value="All">All Leaders</option>
                 )}
-                {leaders.map(leader => (
+                {visibleLeaders.map(leader => (
                   <option key={leader.id} value={leader.uid || leader.id}>{leader.name}</option>
                 ))}
               </select>
@@ -769,7 +801,7 @@ export function Reports() {
                 ) : (
                   <option value="All">All Leaders</option>
                 )}
-                {leaders.map(leader => (
+                {visibleLeaders.map(leader => (
                   <option key={leader.id} value={leader.uid || leader.id}>{leader.name}</option>
                 ))}
               </select>

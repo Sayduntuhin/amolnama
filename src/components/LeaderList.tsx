@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Trash2, Mail, Shield, User, Loader2, Search } from 'lucide-react';
+import { Plus, Trash2, Mail, Shield, User, Loader2, Search, Pencil } from 'lucide-react';
 import { leaderService } from '@/src/services/leaderService';
 import { adminService } from '@/src/services/adminService';
 import { useSnackbar } from '@/src/components/Snackbar';
@@ -14,6 +14,7 @@ export function LeaderList() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingLeader, setEditingLeader] = useState<any | null>(null);
 
   const currentUserEmail = auth.currentUser?.email?.toLowerCase().trim();
   const isSuperAdmin = currentUserEmail === 'exceptionhubjvai@gmail.com';
@@ -91,7 +92,10 @@ export function LeaderList() {
           </div>
           
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              setEditingLeader(null);
+              setIsModalOpen(true);
+            }}
             className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-500/20 active:scale-95 w-full sm:w-auto"
           >
             <Plus className="w-5 h-5" />
@@ -135,6 +139,19 @@ export function LeaderList() {
                       </div>
                     </div>
 
+                    <div className="absolute top-4 right-4 flex gap-1.5">
+                      <button
+                        onClick={() => {
+                          setEditingLeader(leader);
+                          setIsModalOpen(true);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-100"
+                        title="Edit Leader / Team"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
                     <div className="flex flex-col items-center mb-4 pt-2">
                       <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center text-white text-lg font-black mb-3 shadow-xl shadow-indigo-600/20 ring-4 ring-indigo-50 group-hover:bg-slate-900 group-hover:ring-slate-100 transition-all">
                         <User className="w-6 h-6 text-white" />
@@ -176,7 +193,7 @@ export function LeaderList() {
         )}
       </div>
 
-      {/* New Leader Modal */}
+      {/* New/Edit Leader Modal */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -187,8 +204,12 @@ export function LeaderList() {
               className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-white/20 max-h-[95vh] flex flex-col"
             >
               <div className="p-6 sm:p-8 border-b border-slate-100 bg-slate-50/50">
-                <h2 className="text-xl font-bold text-slate-900 tracking-tight">Create Leader</h2>
-                <p className="text-slate-500 text-xs font-medium uppercase tracking-widest mt-1">Add to leader credentials roster</p>
+                <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+                  {editingLeader ? 'Edit Leader / Team' : 'Create Leader'}
+                </h2>
+                <p className="text-slate-500 text-xs font-medium uppercase tracking-widest mt-1">
+                  {editingLeader ? 'Modify leader credentials and team details' : 'Add to leader credentials roster'}
+                </p>
               </div>
               <form onSubmit={async (e) => {
                 e.preventDefault();
@@ -202,33 +223,77 @@ export function LeaderList() {
                     designation: f.designation.value,
                   };
 
-                  await leaderService.createLeader(leaderData);
-                  showSuccess('Leader created successfully.');
+                  if (editingLeader) {
+                    await leaderService.updateLeader(editingLeader.id, leaderData);
+                    showSuccess('Leader updated successfully.');
+                  } else {
+                    await leaderService.createLeader(leaderData);
+                    showSuccess('Leader created successfully.');
+                  }
                   setIsModalOpen(false);
+                  setEditingLeader(null);
                   fetchData();
                 } catch (err: any) {
                   console.error(err);
-                  showError('Failed to create Leader: ' + (err.message || 'unknown error'));
+                  showError(`Failed to ${editingLeader ? 'update' : 'create'} Leader: ` + (err.message || 'unknown error'));
                 } finally {
                   setIsSubmitting(false);
                 }
               }} className="p-6 sm:p-8 space-y-5 overflow-y-auto no-scrollbar">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Full Name</label>
-                  <input name="name" required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm" placeholder="e.g. David Miller" />
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Team / Leader Name</label>
+                  <input 
+                    name="name" 
+                    defaultValue={editingLeader ? editingLeader.name : ''} 
+                    required 
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm" 
+                    placeholder="e.g. Alpha Team / David Miller" 
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Email Address</label>
-                  <input name="email" type="email" required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm" placeholder="e.g. david@sprintdesk.io" />
+                  <input 
+                    name="email" 
+                    type="email" 
+                    defaultValue={editingLeader ? editingLeader.email : ''} 
+                    required 
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm" 
+                    placeholder="e.g. david@sprintdesk.io" 
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Designation</label>
-                  <input name="designation" defaultValue="Team Leader" required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm" placeholder="e.g. Senior Team Lead" />
+                  <input 
+                    name="designation" 
+                    defaultValue={editingLeader ? editingLeader.designation : 'Team Leader'} 
+                    required 
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm" 
+                    placeholder="e.g. Senior Team Lead" 
+                  />
                 </div>
+                {editingLeader && (
+                  <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-[10px] text-amber-800 leading-relaxed font-semibold">
+                    <strong>Note:</strong> Changing the email address will reset their login access connection. The new user will need to sign up again under the new email address. Existing team data will be migrated to the new account upon their first login.
+                  </div>
+                )}
                 <div className="flex gap-3 pt-6">
-                  <button type="button" onClick={() => setIsModalOpen(false)} disabled={isSubmitting} className="flex-1 py-3 text-slate-500 font-bold text-sm rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50">Cancel</button>
-                  <button type="submit" disabled={isSubmitting} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50">
-                    {isSubmitting ? 'Creating...' : 'Register Leader'}
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      setIsModalOpen(false);
+                      setEditingLeader(null);
+                    }} 
+                    disabled={isSubmitting} 
+                    className="flex-1 py-3 text-slate-500 font-bold text-sm rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={isSubmitting} 
+                    className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Saving...' : (editingLeader ? 'Save Changes' : 'Register Leader')}
                   </button>
                 </div>
               </form>

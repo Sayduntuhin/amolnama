@@ -32,7 +32,8 @@ import {
 } from '@firebase/firestore';
 
 // Detect if we are using placeholder/mock credentials
-const IS_MOCK = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('remixed-') || firebaseConfig.apiKey === '';
+const IS_MOCK = true;
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 // --- SEED SECTOR ---
 const SEED_PROJECTS = [
@@ -275,53 +276,7 @@ const SEED_DAILY_LOGS = [
   }
 ];
 
-function initLocalStorageSeeds() {
-  if (typeof window !== 'undefined') {
-    if (!localStorage.getItem('projects')) {
-      localStorage.setItem('projects', JSON.stringify(SEED_PROJECTS));
-    }
-    if (!localStorage.getItem('developers')) {
-      localStorage.setItem('developers', JSON.stringify(SEED_DEVELOPERS));
-    }
-    if (!localStorage.getItem('admins')) {
-      localStorage.setItem('admins', JSON.stringify([
-        {
-          id: "admin-user-id",
-          name: "Admin Leader",
-          email: "admin@sprintdesk.io",
-          designation: "Lead Administrator",
-          createdAt: new Date().toISOString()
-        }
-      ]));
-    }
-    if (!localStorage.getItem('dailyProgress')) {
-      localStorage.setItem('dailyProgress', JSON.stringify(SEED_DAILY_LOGS));
-    }
-    Object.entries(SEED_PHASES).forEach(([key, val]) => {
-      if (!localStorage.getItem(key)) {
-        localStorage.setItem(key, JSON.stringify(val));
-      }
-    });
-    Object.entries(SEED_ISSUES).forEach(([key, val]) => {
-      if (!localStorage.getItem(key)) {
-        localStorage.setItem(key, JSON.stringify(val));
-      }
-    });
-    // Default Administrator Login Seed
-    if (!localStorage.getItem('sprintdesk_curr_user')) {
-      localStorage.setItem('sprintdesk_curr_user', JSON.stringify({
-        uid: "admin-user-id",
-        email: "admin@sprintdesk.io",
-        displayName: "Administrator",
-        emailVerified: true
-      }));
-    }
-  }
-}
-
-if (IS_MOCK) {
-  initLocalStorageSeeds();
-}
+// Seeds are handled on the server-side database.json. No client-side initialization required.
 
 // --- CORE MOCK PROVIDER CLASS SECTOR ---
 class MockAuth {
@@ -337,7 +292,6 @@ class MockAuth {
 
   onAuthStateChanged(callback: (user: any) => void) {
     this.listeners.push(callback);
-    // Fire initially
     setTimeout(() => callback(this.currentUser), 0);
     return () => {
       this.listeners = this.listeners.filter(l => l !== callback);
@@ -349,79 +303,62 @@ class MockAuth {
     this.listeners.forEach(l => l(user));
   }
 
-  signInWithEmailAndPassword(email: string) {
-    const emailLower = email.toLowerCase().trim();
-    const developers = JSON.parse(localStorage.getItem('developers') || '[]');
-    const matchedDev = developers.find((d: any) => d.email.toLowerCase() === emailLower);
-
-    const admins = JSON.parse(localStorage.getItem('admins') || '[]');
-    const matchedAdmin = admins.find((a: any) => a.email.toLowerCase() === emailLower);
-
-    let payload: any = null;
-
-    if (emailLower === 'exceptionhubjvai@gmail.com') {
-      payload = {
-        uid: "super-admin-id",
-        email: "exceptionhubjvai@gmail.com",
-        displayName: "Super Admin",
-        emailVerified: true
-      };
-    } else if (emailLower === 'admin@sprintdesk.io') {
-      payload = {
-        uid: "admin-user-id",
-        email: "admin@sprintdesk.io",
-        displayName: "Administrator",
-        emailVerified: true
-      };
-    } else if (matchedDev) {
-      payload = {
-        uid: matchedDev.id,
-        email: matchedDev.email,
-        displayName: matchedDev.name,
-        emailVerified: true
-      };
-    } else if (matchedAdmin) {
-      payload = {
-        uid: matchedAdmin.id,
-        email: matchedAdmin.email,
-        displayName: matchedAdmin.name,
-        emailVerified: true
-      };
-    } else {
-      return Promise.reject(new Error("Firebase Auth Error: auth/user-not-found"));
+  async signInWithEmailAndPassword(email: string, password?: string) {
+    const response = await fetch(API_BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.message || "Authentication failed");
     }
-
-    localStorage.setItem('sprintdesk_curr_user', JSON.stringify(payload));
+    
+    const res = await response.json();
+    localStorage.setItem('sprintdesk_session_token', res.token);
+    localStorage.setItem('sprintdesk_curr_user', JSON.stringify(res.user));
     this.notify();
-    return Promise.resolve({ user: payload });
+    return { user: res.user };
   }
 
-  createUserWithEmailAndPassword(email: string) {
-    const emailLower = email.toLowerCase().trim();
-    const developers = JSON.parse(localStorage.getItem('developers') || '[]');
-    const matchedDev = developers.find((d: any) => d.email.toLowerCase() === emailLower);
-
-    const admins = JSON.parse(localStorage.getItem('admins') || '[]');
-    const matchedAdmin = admins.find((a: any) => a.email.toLowerCase() === emailLower);
-
-    if (emailLower !== 'exceptionhubjvai@gmail.com' && emailLower !== 'admin@sprintdesk.io' && !matchedDev && !matchedAdmin) {
-      return Promise.reject(new Error("Firebase Auth Error: auth/email-not-registered-in-roster"));
+  async createUserWithEmailAndPassword(email: string, password?: string) {
+    const response = await fetch(API_BASE + '/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.message || "Registration failed");
     }
-
-    const payload = {
-      uid: matchedDev ? matchedDev.id : (matchedAdmin ? matchedAdmin.id : "new-user-id"),
-      email: email,
-      displayName: matchedDev ? matchedDev.name : (matchedAdmin ? matchedAdmin.name : email.split('@')[0]),
-      emailVerified: true
-    };
-
-    localStorage.setItem('sprintdesk_curr_user', JSON.stringify(payload));
+    
+    const res = await response.json();
+    localStorage.setItem('sprintdesk_session_token', res.token);
+    localStorage.setItem('sprintdesk_curr_user', JSON.stringify(res.user));
     this.notify();
-    return Promise.resolve({ user: payload });
+    return { user: res.user };
+  }
+
+  async resetPassword(email: string, newPassword?: string, resetKey?: string) {
+    const response = await fetch(API_BASE + '/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: newPassword, resetKey })
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.message || "Password reset failed");
+    }
+    
+    return await response.json();
   }
 
   signOut() {
     localStorage.removeItem('sprintdesk_curr_user');
+    localStorage.removeItem('sprintdesk_session_token');
     this.notify();
     return Promise.resolve();
   }
@@ -441,130 +378,31 @@ export class Query {
 
 // --- EXPORTED ENDPOINTS & FUNCTIONS ---
 
-const realApp = IS_MOCK ? null : realInitializeApp(firebaseConfig);
-const realDb = IS_MOCK ? null : (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)" ? realGetFirestore(realApp!, firebaseConfig.firestoreDatabaseId) : realGetFirestore(realApp!));
-const realAuth = IS_MOCK ? null : realGetAuth(realApp!);
-
-export const app = IS_MOCK ? { options: { projectId: firebaseConfig.projectId } } : realApp;
-export const db = IS_MOCK ? { app } as any : realDb as any;
-export const auth = IS_MOCK ? new MockAuth() as any : realAuth as any;
+export const app = { options: { projectId: "local-custom-db" } };
+export const db = { app } as any;
+export const auth = new MockAuth() as any;
 
 export function initializeApp() { return app; }
 export function getFirestore() { return db; }
 export function getAuth() { return auth; }
 
-async function seedRealFirestoreIfEmpty() {
-  if (IS_MOCK || !realDb) return;
-  try {
-    // Check and seed admins collection with default admin if empty
-    const adminCol = realCollection(realDb, 'admins');
-    const adminSnap = await realGetDocs(realQuery(adminCol));
-    if (adminSnap.empty) {
-      const adminBatch = realWriteBatch(realDb);
-      const adminDoc = realDoc(realDb, 'admins', 'admin-user-id');
-      adminBatch.set(adminDoc, {
-        name: "Admin Leader",
-        email: "admin@sprintdesk.io",
-        designation: "Lead Administrator",
-        createdAt: realServerTimestamp()
-      });
-      await adminBatch.commit();
-      console.log("Admins collection seeded successfully with default admin.");
-    }
-
-    const devCol = realCollection(realDb, 'developers');
-    const snap = await realGetDocs(realQuery(devCol));
-    if (!snap.empty) {
-      return; 
-    }
-
-    console.log("Empty real Firestore detected. Seeding starting...");
-    
-    // Set up default admin user doc or credentials
-    const developerBatch = realWriteBatch(realDb);
-    for (const dev of SEED_DEVELOPERS) {
-      const devDoc = realDoc(realDb, 'developers', dev.id);
-      developerBatch.set(devDoc, dev);
-    }
-    await developerBatch.commit();
-    console.log("Developers collection seeded successfully on production database.");
-
-    // Seed Projects and sub-collections 
-    for (const proj of SEED_PROJECTS) {
-      const projDoc = realDoc(realDb, 'projects', proj.id);
-      const { id, ...projData } = proj;
-      await realUpdateDoc(projDoc, projData); 
-
-      // Seed phases subcollection
-      const phaseKey = `projects/${proj.id}/phases`;
-      const phases = SEED_PHASES[phaseKey] || [];
-      for (const ph of phases) {
-        const phDoc = realDoc(realDb, `projects/${proj.id}/phases`, ph.id);
-        const { id: phId, ...phData } = ph;
-        await realUpdateDoc(phDoc, phData);
-      }
-
-      // Seed issues subcollection
-      const issueKey = `projects/${proj.id}/issues`;
-      const issues = SEED_ISSUES[issueKey] || [];
-      for (const iss of issues) {
-        const issDoc = realDoc(realDb, `projects/${proj.id}/issues`, iss.id);
-        const { id: issId, ...issData } = iss;
-        await realUpdateDoc(issDoc, issData);
-      }
-    }
-
-    // Seed Daily Progress logs
-    for (const log of SEED_DAILY_LOGS) {
-      const logDoc = realDoc(realDb, 'dailyProgress', log.id);
-      const { id, ...logData } = log;
-      await realUpdateDoc(logDoc, logData);
-    }
-
-    console.log("Real Firestore database successfully pre-loaded with all SprintDesk schemas!");
-  } catch (error) {
-    console.warn("Could not auto-seed real database. This is common if your database security rules are currently denying write access:", error);
-  }
-}
-
 export function onAuthStateChanged(authInstance: any, callback: (user: any) => void) {
-  if (IS_MOCK) {
-    return auth.onAuthStateChanged(callback);
-  } else {
-    return realOnAuthStateChanged(authInstance, (user) => {
-      if (user) {
-        seedRealFirestoreIfEmpty();
-      }
-      callback(user);
-    });
-  }
+  return auth.onAuthStateChanged(callback);
 }
 
-export function signInWithEmailAndPassword(authInstance: any, email: string, password: string) {
-  if (IS_MOCK) {
-    return auth.signInWithEmailAndPassword(email);
-  } else {
-    return realSignInWithEmailAndPassword(authInstance, email, password);
-  }
+export function signInWithEmailAndPassword(authInstance: any, email: string, password?: string) {
+  return auth.signInWithEmailAndPassword(email, password);
 }
 
-export function createUserWithEmailAndPassword(authInstance: any, email: string, password: string) {
-  if (IS_MOCK) {
-    return auth.createUserWithEmailAndPassword(email);
-  } else {
-    return realCreateUserWithEmailAndPassword(authInstance, email, password);
-  }
+export function createUserWithEmailAndPassword(authInstance: any, email: string, password?: string) {
+  return auth.createUserWithEmailAndPassword(email, password);
 }
 
 export function signInWithPopup(authInstance: any, provider: any) {
-  if (IS_MOCK) {
-    return auth.signInWithEmailAndPassword("admin@sprintdesk.io");
-  } else {
-    return realSignInWithPopup(authInstance, provider);
-  }
+  return auth.signInWithEmailAndPassword("admin@sprintdesk.io", "admin123");
 }
 
-export const GoogleAuthProvider = IS_MOCK ? class GoogleAuthProvider {} : realGoogleAuthProvider;
+export class GoogleAuthProvider {}
 
 export interface User {
   uid: string;
@@ -574,254 +412,183 @@ export interface User {
 }
 
 export function doc(parent: any, ...segments: string[]) {
-  if (IS_MOCK) {
-    let fullPath = '';
-    if (parent instanceof CollectionRef) {
-      fullPath = parent.path;
-    } else if (parent instanceof DocRef) {
-      fullPath = parent.path + '/' + parent.id;
-    }
-    
-    const allSegments = [...segments];
-    if (fullPath) {
-      allSegments.unshift(fullPath);
-    }
-    
-    const joined = allSegments.filter(Boolean).join('/');
-    const parts = joined.split('/');
-    
-    const isOdd = parts.length % 2 === 1;
-    let collectionPath = '';
-    let id = '';
-    
-    if (isOdd) {
-      collectionPath = parts.join('/');
-      id = Math.random().toString(36).substr(2, 9);
-    } else {
-      id = parts.pop() || '';
-      collectionPath = parts.join('/');
-    }
-    
-    return new DocRef(null, collectionPath, id);
-  } else {
-    return realDoc(parent, ...segments);
+  let fullPath = '';
+  if (parent instanceof CollectionRef) {
+    fullPath = parent.path;
+  } else if (parent instanceof DocRef) {
+    fullPath = parent.path + '/' + parent.id;
   }
+  
+  const allSegments = [...segments];
+  if (fullPath) {
+    allSegments.unshift(fullPath);
+  }
+  
+  const joined = allSegments.filter(Boolean).join('/');
+  const parts = joined.split('/');
+  
+  const isOdd = parts.length % 2 === 1;
+  let collectionPath = '';
+  let id = '';
+  
+  if (isOdd) {
+    collectionPath = parts.join('/');
+    id = Math.random().toString(36).substr(2, 9);
+  } else {
+    id = parts.pop() || '';
+    collectionPath = parts.join('/');
+  }
+  
+  return new DocRef(null, collectionPath, id);
 }
 
 export function collection(dbInstance: any, path: string, ...segments: string[]) {
-  if (IS_MOCK) {
-    const parts = [path, ...segments].filter(Boolean);
-    return new CollectionRef(null, parts.join('/'));
-  } else {
-    return realCollection(dbInstance, path, ...segments);
-  }
+  const parts = [path, ...segments].filter(Boolean);
+  return new CollectionRef(null, parts.join('/'));
 }
 
 export function query(colRef: any, ...constraints: any[]) {
-  if (IS_MOCK) {
-    return new Query(colRef, constraints);
-  } else {
-    return realQuery(colRef, ...constraints);
-  }
+  return new Query(colRef, constraints);
 }
 
 export function where(field: string, op: any, value: any) {
-  if (IS_MOCK) {
-    return { type: 'where', field, op, value };
-  } else {
-    return realWhere(field, op, value);
-  }
+  return { type: 'where', field, op, value };
 }
 
 export function orderBy(field: string, direction: 'asc' | 'desc' = 'asc') {
-  if (IS_MOCK) {
-    return { type: 'orderBy', field, direction };
-  } else {
-    return realOrderBy(field, direction);
-  }
+  return { type: 'orderBy', field, direction };
 }
 
 export function serverTimestamp() {
-  if (IS_MOCK) {
-    return new Date().toISOString() as any;
-  } else {
-    return realServerTimestamp();
-  }
+  return new Date().toISOString() as any;
 }
 
-export function getDoc(docRef: any) {
-  if (IS_MOCK) {
-    const collectionKey = docRef.path;
-    const list = JSON.parse(localStorage.getItem(collectionKey) || '[]');
-    const item = list.find((x: any) => x.id === docRef.id);
-    return Promise.resolve({
-      id: docRef.id,
-      exists: () => !!item,
-      data: () => item
-    });
-  } else {
-    return realGetDoc(docRef);
-  }
+export async function getDoc(docRef: any) {
+  const token = localStorage.getItem('sprintdesk_session_token') || '';
+  const response = await fetch(API_BASE + '/api/db/action', {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ action: 'getDoc', path: docRef.path, id: docRef.id })
+  });
+  const res = await response.json();
+  return {
+    id: docRef.id,
+    exists: () => res.exists,
+    data: () => res.data
+  };
 }
 
-export function getDocFromServer(docRef: any) {
-  if (IS_MOCK) {
-    return getDoc(docRef);
-  } else {
-    return realGetDocFromServer(docRef);
-  }
+export async function getDocFromServer(docRef: any) {
+  return getDoc(docRef);
 }
 
-export function getDocs(q: any) {
-  if (IS_MOCK) {
-    let path = '';
-    let constraints: any[] = [];
-    
-    if (q instanceof CollectionRef) {
-      path = q.path;
-    } else if (q instanceof Query) {
-      path = q.collectionRef.path;
-      constraints = q.constraints;
-    }
-    
-    let list = JSON.parse(localStorage.getItem(path) || '[]');
-    
-    // Apply where constraints
-    constraints.forEach(c => {
-      if (c && c.type === 'where') {
-        list = list.filter((item: any) => {
-          const itemVal = item[c.field];
-          if (c.op === '==') return String(itemVal).toLowerCase() === String(c.value).toLowerCase();
-          if (c.op === 'in') return Array.isArray(c.value) && c.value.includes(itemVal);
-          return true;
-        });
-      }
-    });
-    
-    // Apply orderBy constraints
-    constraints.forEach(c => {
-      if (c && c.type === 'orderBy') {
-        list.sort((a: any, b: any) => {
-          const aVal = a[c.field];
-          const bVal = b[c.field];
-          if (aVal === undefined && bVal === undefined) return 0;
-          if (aVal === undefined) return 1;
-          if (bVal === undefined) return -1;
-          
-          let cmp = 0;
-          if (typeof aVal === 'string' && typeof bVal === 'string') {
-            cmp = aVal.localeCompare(bVal);
-          } else {
-            cmp = (aVal < bVal) ? -1 : (aVal > bVal) ? 1 : 0;
-          }
-          return c.direction === 'desc' ? -cmp : cmp;
-        });
-      }
-    });
-    
-    const docSnaps = list.map((item: any) => {
-      return {
-        id: item.id,
-        exists: () => true,
-        data: () => item
-      };
-    });
-    
-    return Promise.resolve({
-      empty: docSnaps.length === 0,
-      docs: docSnaps
-    });
-  } else {
-    return realGetDocs(q);
+export async function getDocs(q: any) {
+  let path = '';
+  let constraints: any[] = [];
+  
+  if (q instanceof CollectionRef) {
+    path = q.path;
+  } else if (q instanceof Query) {
+    path = q.collectionRef.path;
+    constraints = q.constraints;
   }
+  
+  const token = localStorage.getItem('sprintdesk_session_token') || '';
+  const response = await fetch(API_BASE + '/api/db/action', {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ action: 'getDocs', path, constraints })
+  });
+  const res = await response.json();
+  
+  const docSnaps = res.docs.map((doc: any) => {
+    return {
+      id: doc.id,
+      exists: () => true,
+      data: () => doc.data
+    };
+  });
+  
+  return {
+    empty: docSnaps.length === 0,
+    docs: docSnaps
+  };
 }
 
-export function addDoc(colRef: any, data: any) {
-  if (IS_MOCK) {
-    const collectionKey = colRef.path;
-    const list = JSON.parse(localStorage.getItem(collectionKey) || '[]');
-    const newId = Math.random().toString(36).substr(2, 9);
-    const newItem = { id: newId, ...data };
-    list.push(newItem);
-    localStorage.setItem(collectionKey, JSON.stringify(list));
-    return Promise.resolve({ id: newId });
-  } else {
-    return realAddDoc(colRef, data);
-  }
+export async function addDoc(colRef: any, data: any) {
+  const token = localStorage.getItem('sprintdesk_session_token') || '';
+  const response = await fetch(API_BASE + '/api/db/action', {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ action: 'addDoc', path: colRef.path, data })
+  });
+  const res = await response.json();
+  return { id: res.id };
 }
 
-export function updateDoc(docRef: any, data: any) {
-  if (IS_MOCK) {
-    const collectionKey = docRef.path;
-    const list = JSON.parse(localStorage.getItem(collectionKey) || '[]');
-    const idx = list.findIndex((item: any) => item.id === docRef.id);
-    if (idx !== -1) {
-      list[idx] = { ...list[idx], ...data };
-      localStorage.setItem(collectionKey, JSON.stringify(list));
-    }
-    return Promise.resolve();
-  } else {
-    return realUpdateDoc(docRef, data);
-  }
+export async function updateDoc(docRef: any, data: any) {
+  const token = localStorage.getItem('sprintdesk_session_token') || '';
+  const response = await fetch(API_BASE + '/api/db/action', {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ action: 'updateDoc', path: docRef.path, id: docRef.id, data })
+  });
+  await response.json();
+  return Promise.resolve();
 }
 
-export function deleteDoc(docRef: any) {
-  if (IS_MOCK) {
-    const collectionKey = docRef.path;
-    const list = JSON.parse(localStorage.getItem(collectionKey) || '[]');
-    const filtered = list.filter((item: any) => item.id !== docRef.id);
-    localStorage.setItem(collectionKey, JSON.stringify(filtered));
-    return Promise.resolve();
-  } else {
-    return realDeleteDoc(docRef);
-  }
+export async function deleteDoc(docRef: any) {
+  const token = localStorage.getItem('sprintdesk_session_token') || '';
+  const response = await fetch(API_BASE + '/api/db/action', {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ action: 'deleteDoc', path: docRef.path, id: docRef.id })
+  });
+  await response.json();
+  return Promise.resolve();
 }
 
 export function writeBatch(dbInstance: any) {
-  if (IS_MOCK) {
-    const operations: Array<() => void> = [];
-    return {
-      set(docRef: any, data: any) {
-        operations.push(() => {
-          const collectionKey = docRef.path;
-          const list = JSON.parse(localStorage.getItem(collectionKey) || '[]');
-          const existingIdx = list.findIndex((x: any) => x.id === docRef.id);
-          const newItem = { id: docRef.id, ...data };
-          if (existingIdx !== -1) {
-            list[existingIdx] = newItem;
-          } else {
-            list.push(newItem);
-          }
-          localStorage.setItem(collectionKey, JSON.stringify(list));
-        });
-      },
-      update(docRef: any, data: any) {
-        operations.push(() => {
-          const collectionKey = docRef.path;
-          const list = JSON.parse(localStorage.getItem(collectionKey) || '[]');
-          const idx = list.findIndex((item: any) => item.id === docRef.id);
-          if (idx !== -1) {
-            list[idx] = { ...list[idx], ...data };
-            localStorage.setItem(collectionKey, JSON.stringify(list));
-          }
-        });
-      },
-      delete(docRef: any) {
-        operations.push(() => {
-          const collectionKey = docRef.path;
-          const list = JSON.parse(localStorage.getItem(collectionKey) || '[]');
-          const filtered = list.filter((item: any) => item.id !== docRef.id);
-          localStorage.setItem(collectionKey, JSON.stringify(filtered));
-        });
-      },
-      async commit() {
-        operations.forEach(op => op());
-        return Promise.resolve();
-      }
-    };
-  } else {
-    return realWriteBatch(dbInstance);
-  }
+  const operations: any[] = [];
+  return {
+    set(docRef: any, data: any) {
+      operations.push({ type: 'set', path: docRef.path, id: docRef.id, data });
+    },
+    update(docRef: any, data: any) {
+      operations.push({ type: 'update', path: docRef.path, id: docRef.id, data });
+    },
+    delete(docRef: any) {
+      operations.push({ type: 'delete', path: docRef.path, id: docRef.id });
+    },
+    async commit() {
+      const token = localStorage.getItem('sprintdesk_session_token') || '';
+      const response = await fetch(API_BASE + '/api/db/action', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: 'writeBatch', operations })
+      });
+      await response.json();
+      return Promise.resolve();
+    }
+  };
 }
 
 // Global handle errors helper
@@ -854,3 +621,77 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
+
+export async function runFirebaseImport(email?: string, password?: string) {
+  // Initialize real firebase
+  const realApp = realInitializeApp(firebaseConfig);
+  const realDb = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)" 
+    ? realGetFirestore(realApp, firebaseConfig.firestoreDatabaseId) 
+    : realGetFirestore(realApp);
+  const realAuth = realGetAuth(realApp);
+  
+  if (email && password) {
+    console.log("Logging in via Email/Password to Firebase...");
+    await realSignInWithEmailAndPassword(realAuth, email, password);
+  } else {
+    console.log("Logging in via Google Popup to Firebase...");
+    const provider = new realGoogleAuthProvider();
+    await realSignInWithPopup(realAuth, provider);
+  }
+  
+  console.log("Logged in to Firebase successfully!");
+  
+  // Download data
+  const database = {
+    admins: [],
+    leaders: [],
+    developers: [],
+    projects: [],
+    dailyProgress: []
+  };
+  
+  const collections = ['admins', 'leaders', 'developers', 'projects', 'dailyProgress'];
+  for (const colName of collections) {
+    const snap = await realGetDocs(realCollection(realDb, colName));
+    snap.forEach((doc) => {
+      database[colName].push({ id: doc.id, ...doc.data() });
+    });
+  }
+  
+  // Subcollections (phases and issues)
+  for (const project of database.projects) {
+    const projId = project.id;
+    
+    // Phases
+    const phaseSnap = await realGetDocs(realCollection(realDb, `projects/${projId}/phases`));
+    const phasesList = [];
+    phaseSnap.forEach((doc) => {
+      phasesList.push({ id: doc.id, ...doc.data() });
+    });
+    if (phasesList.length > 0) {
+      database[`projects/${projId}/phases`] = phasesList;
+    }
+    
+    // Issues
+    const issueSnap = await realGetDocs(realCollection(realDb, `projects/${projId}/issues`));
+    const issuesList = [];
+    issueSnap.forEach((doc) => {
+      issuesList.push({ id: doc.id, ...doc.data() });
+    });
+    if (issuesList.length > 0) {
+      database[`projects/${projId}/issues`] = issuesList;
+    }
+  }
+  
+  // Send payload to server
+  const response = await fetch(API_BASE + '/api/db/import_payload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(database)
+  });
+  
+  if (!response.ok) {
+    throw new Error("Failed to save imported data on the server");
+  }
+}
+

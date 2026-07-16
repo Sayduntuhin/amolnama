@@ -105,7 +105,7 @@ export function resolvePhaseStatus(phase: PhaseTracking): PhaseStatus {
   }
   
   // 3. Check if deadline is missed
-  if (phase.expectedDeliveryDate) {
+  if (phase.expectedDeliveryDate && phase.status !== 'Pending') {
     const todayStr = getGMT6DateString();
     if (todayStr > phase.expectedDeliveryDate) {
       return 'Delayed';
@@ -195,12 +195,36 @@ export function resolveProjectStatus(project: Project, phases: PhaseTracking[]):
   return 'WIP';
 }
 
-export function formatDate(date: string | Date) {
-  return new Date(date).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  });
+export function formatDate(date: any) {
+  if (!date) return 'N/A';
+  try {
+    let d: Date;
+    if (date instanceof Date) {
+      d = date;
+    } else if (typeof date === 'string') {
+      d = new Date(date);
+    } else if (date && typeof date === 'object') {
+      if (date.toDate && typeof date.toDate === 'function') {
+        d = date.toDate();
+      } else if (date.seconds !== undefined) {
+        d = new Date(date.seconds * 1000);
+      } else {
+        d = new Date(String(date));
+      }
+    } else {
+      d = new Date(String(date));
+    }
+    
+    if (isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  } catch (err) {
+    console.warn("formatDate failed for:", date, err);
+    return 'N/A';
+  }
 }
 
 export function calculateProjectAge(startDate: any) {
@@ -242,18 +266,33 @@ export function calculateAge(date: string | Date) {
 
 export function formatDateForInput(date: any): string {
   if (!date) return '';
-  if (typeof date === 'string') return date.split('T')[0];
-  if (date.toDate && typeof date.toDate === 'function') {
-    return date.toDate().toISOString().split('T')[0];
+  try {
+    let d: Date;
+    if (typeof date === 'string') {
+      if (!date.includes('T') && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return date;
+      }
+      d = new Date(date);
+    } else if (date instanceof Date) {
+      d = date;
+    } else if (date && typeof date === 'object') {
+      if (date.toDate && typeof date.toDate === 'function') {
+        d = date.toDate();
+      } else if (date.seconds !== undefined) {
+        d = new Date(date.seconds * 1000);
+      } else {
+        d = new Date(String(date));
+      }
+    } else {
+      d = new Date(String(date));
+    }
+    
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString().split('T')[0];
+  } catch (err) {
+    console.warn("formatDateForInput failed for:", date, err);
+    return '';
   }
-  if (date instanceof Date) {
-    return date.toISOString().split('T')[0];
-  }
-  if (date.seconds !== undefined) {
-    // Handle plain objects that look like Timestamps (common in some Firebase versions/serialization)
-    return new Date(date.seconds * 1000).toISOString().split('T')[0];
-  }
-  return String(date).split('T')[0];
 }
 
 /**

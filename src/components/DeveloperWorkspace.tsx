@@ -20,13 +20,29 @@ import {
   Send,
   Wrench,
   Trash2,
-  Loader2
+  Loader2,
+  Key,
+  Edit,
+  Copy,
+  Eye,
+  EyeOff,
+  Check,
+  Lock,
+  Unlock,
+  X,
+  ExternalLink,
+  Server,
+  Database,
+  Globe,
+  GitBranch,
+  ShieldAlert
 } from 'lucide-react';
 import { db, auth } from '@/src/lib/firebase';
 import { developerService } from '@/src/services/developerService';
 import { projectService } from '@/src/services/projectService';
 import { progressService } from '@/src/services/progressService';
-import { Developer, Project, PhaseTracking, DailyProgress, Issue, PhaseStatus, NoWorkReason, MaintenanceProject } from '@/src/types';
+import { credentialService } from '@/src/services/credentialService';
+import { Developer, Project, PhaseTracking, DailyProgress, Issue, PhaseStatus, NoWorkReason, MaintenanceProject, ProjectCredential } from '@/src/types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, resolvePhaseStatus, resolveProjectStatus, calculateProjectAge, calcOverallProgress, calculateDeveloperPerformanceScore, getGMT6DateString } from '@/src/lib/utils';
 import { useSnackbar } from '@/src/components/Snackbar';
@@ -66,6 +82,22 @@ export function DeveloperWorkspace() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [activeProjectTab, setActiveProjectTab] = useState<string | null>(null);
+
+  // Credentials states
+  const [allCredentials, setAllCredentials] = useState<ProjectCredential[]>([]);
+  const [isAddingCredential, setIsAddingCredential] = useState(false);
+  const [editingCredential, setEditingCredential] = useState<ProjectCredential | null>(null);
+  const [credentialFormData, setCredentialFormData] = useState({
+    title: '',
+    category: 'API Key' as 'API Key' | 'Hosting/Server' | 'Database' | 'Repository' | 'Domain' | 'Other',
+    hostOrUrl: '',
+    usernameOrKey: '',
+    passwordOrSecret: '',
+    notes: ''
+  });
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectedCredentialCategory, setSelectedCredentialCategory] = useState<string>('All');
 
   // Forms states
   const [selectedPhaseForLog, setSelectedPhaseForLog] = useState<{ project: Project; phase: PhaseTracking } | null>(null);
@@ -209,6 +241,7 @@ export function DeveloperWorkspace() {
       // 3. For each project, fetch its phases and pick the ones assigned to this developer
       const phasesList: Array<{ project: Project; phase: PhaseTracking }> = [];
       const issuesList: Issue[] = [];
+      const credentialsList: ProjectCredential[] = [];
 
       console.log("[DIAGNOSTIC] Concurrent fetches for project subcollections starting...");
       await Promise.all(safeProjects.map(async (project) => {
@@ -239,6 +272,16 @@ export function DeveloperWorkspace() {
         } catch (issueError) {
           console.error(`[DIAGNOSTIC] Failed to load issues for project ${project.id} (${project.clientName}):`, issueError);
         }
+
+        // Fetch credentials with local try/catch
+        try {
+          const creds = await credentialService.getCredentials(project.id);
+          if (creds) {
+            credentialsList.push(...creds);
+          }
+        } catch (credError) {
+          console.error(`[DIAGNOSTIC] Failed to load credentials for project ${project.id} (${project.clientName}):`, credError);
+        }
       }));
 
       // Sort phases: WIP first, then Delayed, then Extension Requested, then Pending, then Delivered
@@ -257,9 +300,11 @@ export function DeveloperWorkspace() {
 
       console.log("[DIAGNOSTIC] Resolved phases list:", phasesList);
       console.log("[DIAGNOSTIC] Resolved issues list:", issuesList);
+      console.log("[DIAGNOSTIC] Resolved credentials list:", credentialsList);
 
       setAssignedPhases(phasesList);
       setMyIssues(issuesList);
+      setAllCredentials(credentialsList);
 
       if (phasesList.length > 0 && !activeProjectTab) {
         setActiveProjectTab(phasesList[0].phase.id);
@@ -629,6 +674,68 @@ export function DeveloperWorkspace() {
     }
   };
 
+  const handleCredentialSubmit = async (e: React.FormEvent, projectId: string) => {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    
+    const userDisplay = currentDev ? currentDev.name : (auth.currentUser?.email || 'Developer');
+    const payload = {
+      ...credentialFormData,
+      projectId,
+      updatedBy: userDisplay
+    };
+    
+    try {
+      if (editingCredential) {
+        await credentialService.updateCredential(projectId, editingCredential.id, payload);
+        showSuccess('Credential updated successfully.');
+      } else {
+        await credentialService.addCredential(projectId, payload);
+        showSuccess('Credential registered successfully.');
+      }
+      setIsAddingCredential(false);
+      setEditingCredential(null);
+      setCredentialFormData({
+        title: '',
+        category: 'API Key',
+        hostOrUrl: '',
+        usernameOrKey: '',
+        passwordOrSecret: '',
+        notes: ''
+      });
+      await loadDeveloperData();
+    } catch (error: any) {
+      console.error('Failed to save credential:', error);
+      showError(error.message || 'Failed to save credential.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCredentialDelete = async (projectId: string, credentialId: string) => {
+    if (submitting) return;
+    if (window.confirm('Delete this credential? This action is irreversible.')) {
+      setSubmitting(true);
+      try {
+        await credentialService.deleteCredential(projectId, credentialId);
+        showSuccess('Credential deleted successfully.');
+        await loadDeveloperData();
+      } catch (error) {
+        console.error(error);
+        showError('Failed to delete credential.');
+      } finally {
+        setSubmitting(false);
+      }
+    }
+  };
+
+  const handleCopyText = (text: string, keyId: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(keyId);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-4 bg-slate-50/55 rounded-[2.5rem] border border-slate-100">
@@ -688,6 +795,8 @@ export function DeveloperWorkspace() {
     }
     group.items.push(item);
   });
+
+  const activeProject = assignedPhases.find(ap => ap.phase.id === activeProjectTab)?.project;
 
   return (
     <div className="space-y-6 pb-12">
@@ -1483,6 +1592,235 @@ export function DeveloperWorkspace() {
                             </div>
                           )}
                         </div>
+
+                        {/* Credentials & Access Keys section */}
+                        <div className="border-t border-slate-100 pt-6 mt-6">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                            <div>
+                              <h4 className="text-xs font-black uppercase tracking-widest text-slate-400">Credentials & Access Keys</h4>
+                              <p className="text-slate-550 text-slate-500 text-[10px] font-medium mt-0.5">Secure client keys allocated or provided for milestone implementation.</p>
+                            </div>
+                            {allCredentials.filter(c => c.projectId === project.id).length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCredentialFormData({
+                                    title: '',
+                                    category: 'API Key',
+                                    hostOrUrl: '',
+                                    usernameOrKey: '',
+                                    passwordOrSecret: '',
+                                    notes: ''
+                                  });
+                                  setEditingCredential(null);
+                                  setIsAddingCredential(true);
+                                }}
+                                className="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-widest rounded-lg border border-emerald-250 cursor-pointer transition-all active:scale-95 flex items-center gap-1.5 self-start sm:self-center"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Add Key</span>
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Category Filter Pills for Developer Workspace */}
+                          {allCredentials.filter(c => c.projectId === project.id).length > 0 && (
+                            <div className="flex gap-1.5 pb-3 overflow-x-auto no-scrollbar border-b border-slate-100 mb-4">
+                              {['All', 'API Key', 'Hosting/Server', 'Database', 'Repository', 'Domain', 'Other'].map(cat => {
+                                const isActive = selectedCredentialCategory === cat;
+                                const count = cat === 'All' 
+                                  ? allCredentials.filter(c => c.projectId === project.id).length 
+                                  : allCredentials.filter(c => c.projectId === project.id && c.category === cat).length;
+                                return (
+                                  <button
+                                    key={cat}
+                                    type="button"
+                                    onClick={() => setSelectedCredentialCategory(cat)}
+                                    className={cn(
+                                      "px-3 py-1.5 text-[8px] font-black uppercase tracking-widest rounded-lg border transition-all cursor-pointer whitespace-nowrap active:scale-95 flex items-center gap-1",
+                                      isActive
+                                        ? "bg-slate-900 border-slate-900 text-white shadow-sm"
+                                        : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
+                                    )}
+                                  >
+                                    <span>{cat}</span>
+                                    <span className={cn(
+                                      "text-[8px] font-bold font-mono px-1 rounded shrink-0",
+                                      isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-450 text-slate-400"
+                                    )}>{count}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                          
+                          {allCredentials.filter(c => c.projectId === project.id).length === 0 ? (
+                            <div className="bg-slate-50/50 border-2 border-dashed border-slate-200 rounded-2xl py-10 text-center">
+                              <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto mb-3 border border-slate-100 shadow-inner">
+                                <Key className="w-5 h-5 text-slate-350" />
+                              </div>
+                              <p className="text-slate-400 font-black uppercase tracking-widest text-[9px]">No credentials saved yet</p>
+                              <p className="text-slate-400 text-[10px] mt-1 max-w-xs mx-auto font-medium mb-4">Store database, api keys, server logins, or repositories safely.</p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCredentialFormData({
+                                    title: '',
+                                    category: 'API Key',
+                                    hostOrUrl: '',
+                                    usernameOrKey: '',
+                                    passwordOrSecret: '',
+                                    notes: ''
+                                  });
+                                  setEditingCredential(null);
+                                  setIsAddingCredential(true);
+                                }}
+                                className="px-4 py-2 text-[9px] font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-all shadow uppercase tracking-widest active:scale-95 cursor-pointer"
+                              >
+                                Register First Key
+                              </button>
+                            </div>
+                          ) : allCredentials.filter(c => c.projectId === project.id && (selectedCredentialCategory === 'All' || c.category === selectedCredentialCategory)).length === 0 ? (
+                            <div className="bg-white border border-slate-150 rounded-2xl py-10 text-center shadow-sm">
+                              <div className="w-8 h-8 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3 border border-slate-100 shadow-inner">
+                                <ShieldAlert className="w-4 h-4 text-slate-300" />
+                              </div>
+                              <p className="text-slate-450 text-[9px] font-black uppercase tracking-widest">No matching keys</p>
+                              <p className="text-slate-400 text-[10px] mt-1 max-w-xs mx-auto font-medium">There are no project credentials matching "{selectedCredentialCategory}".</p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              {allCredentials
+                                .filter(c => c.projectId === project.id && (selectedCredentialCategory === 'All' || c.category === selectedCredentialCategory))
+                                .map(cred => {
+                                  const isVisible = showSecrets[cred.id] || false;
+                                  const isCopied = copiedId === cred.id;
+                                  const categoryStyles = {
+                                    'API Key': 'bg-violet-50 text-violet-750 border-violet-100',
+                                    'Hosting/Server': 'bg-rose-50 text-rose-750 border-rose-100',
+                                    'Database': 'bg-emerald-50 text-emerald-750 border-emerald-100',
+                                    'Repository': 'bg-blue-50 text-blue-755 border-blue-100',
+                                    'Domain': 'bg-amber-50 text-amber-750 border-amber-100',
+                                    'Other': 'bg-slate-50 text-slate-755 text-slate-700 border-slate-100',
+                                  };
+
+                                  const getCategoryIcon = (category: string) => {
+                                    switch (category) {
+                                      case 'API Key': return <Key className="w-3.5 h-3.5 text-violet-650" />;
+                                      case 'Hosting/Server': return <Server className="w-3.5 h-3.5 text-rose-650" />;
+                                      case 'Database': return <Database className="w-3.5 h-3.5 text-emerald-655" />;
+                                      case 'Repository': return <GitBranch className="w-3.5 h-3.5 text-blue-650" />;
+                                      case 'Domain': return <Globe className="w-3.5 h-3.5 text-amber-655" />;
+                                      default: return <ShieldAlert className="w-3.5 h-3.5 text-slate-600" />;
+                                    }
+                                  };
+                                  
+                                  return (
+                                    <div key={cred.id} className="bg-slate-50/50 rounded-2xl border border-slate-200/80 p-4 space-y-3 relative group hover:border-emerald-200 hover:bg-white transition-all">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className={cn("text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border flex items-center gap-1.5", categoryStyles[cred.category] || categoryStyles['Other'])}>
+                                          {getCategoryIcon(cred.category)}
+                                          <span>{cred.category}</span>
+                                        </span>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setCredentialFormData({
+                                                title: cred.title,
+                                                category: cred.category,
+                                                hostOrUrl: cred.hostOrUrl || '',
+                                                usernameOrKey: cred.usernameOrKey || '',
+                                                passwordOrSecret: cred.passwordOrSecret || '',
+                                                notes: cred.notes || ''
+                                              });
+                                              setEditingCredential(cred);
+                                              setIsAddingCredential(true);
+                                            }}
+                                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded transition-all cursor-pointer"
+                                            title="Edit"
+                                          >
+                                            <Edit className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCredentialDelete(project.id, cred.id)}
+                                            className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded transition-all cursor-pointer"
+                                            title="Delete"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                      
+                                      <div>
+                                        <h5 className="text-xs font-black text-slate-900 leading-tight truncate">{cred.title}</h5>
+                                      </div>
+                                      
+                                      <div className="space-y-2 text-[11px] text-slate-650 font-medium">
+                                        {cred.hostOrUrl && (
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="text-[9px] text-slate-450 text-slate-400 uppercase font-black tracking-widest shrink-0">Host:</span>
+                                            <span className="truncate text-slate-700 font-bold">{cred.hostOrUrl}</span>
+                                            {cred.hostOrUrl.startsWith('http') && (
+                                              <a href={cred.hostOrUrl} target="_blank" rel="noreferrer" className="text-indigo-500 hover:text-indigo-700 shrink-0">
+                                                <ExternalLink className="w-3 h-3" />
+                                              </a>
+                                            )}
+                                          </div>
+                                        )}
+                                        
+                                        {cred.usernameOrKey && (
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="text-[9px] text-slate-450 text-slate-400 uppercase font-black tracking-widest shrink-0">User:</span>
+                                            <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-150 text-slate-700 truncate font-bold">{cred.usernameOrKey}</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleCopyText(cred.usernameOrKey || '', cred.id + '_username')}
+                                              className="text-slate-400 hover:text-indigo-600 p-0.5 hover:bg-slate-100 rounded shrink-0 cursor-pointer"
+                                            >
+                                              {copiedId === (cred.id + '_username') ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                                            </button>
+                                          </div>
+                                        )}
+                                        
+                                        {cred.passwordOrSecret && (
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="text-[9px] text-slate-450 text-slate-405 text-slate-400 uppercase font-black tracking-widest shrink-0">Secret:</span>
+                                            <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-150 text-slate-700 truncate font-bold font-black">
+                                              {isVisible ? cred.passwordOrSecret : '••••••••••••'}
+                                            </span>
+                                            <div className="flex items-center gap-0.5 shrink-0">
+                                              <button
+                                                type="button"
+                                                onClick={() => setShowSecrets(prev => ({ ...prev, [cred.id]: !isVisible }))}
+                                                className="text-slate-400 hover:text-indigo-600 p-0.5 hover:bg-slate-100 rounded cursor-pointer"
+                                              >
+                                                {isVisible ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleCopyText(cred.passwordOrSecret || '', cred.id + '_pwd')}
+                                                className="text-slate-400 hover:text-indigo-600 p-0.5 hover:bg-slate-100 rounded cursor-pointer"
+                                              >
+                                                {copiedId === (cred.id + '_pwd') ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                                              </button>
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        {cred.notes && (
+                                          <div className="pt-1.5 border-t border-slate-150/40 text-[10px] leading-relaxed italic text-slate-500">
+                                            {cred.notes}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          )}
+                        </div>
                       </motion.div>
                     );
                   })}
@@ -2114,6 +2452,136 @@ export function DeveloperWorkspace() {
                   <button type="button" onClick={() => setSelectedProjectForIssue(null)} className="flex-1 py-2.5 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-50 transition-all">Cancel</button>
                   <button type="submit" disabled={submitting} className="flex-[2] py-2.5 bg-rose-600 text-white rounded-xl font-bold text-xs hover:bg-rose-700 transition-all shadow-md">
                     {submitting ? 'Registering Blocker...' : 'Publish Blocker'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Add/Edit Project Credential Modal Form */}
+      <AnimatePresence>
+        {isAddingCredential && activeProject && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[2rem] w-full max-w-xl shadow-2xl p-8 border border-slate-100"
+            >
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2.5 tracking-tight uppercase text-base">
+                  <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center border border-emerald-100 text-emerald-600">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  {editingCredential ? 'Modify Credential' : 'Register Credential'}
+                </h3>
+                <button
+                  onClick={() => {
+                    setIsAddingCredential(false);
+                    setEditingCredential(null);
+                  }}
+                  className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-650 rounded-xl transition-all cursor-pointer animate-none"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              <form onSubmit={(e) => handleCredentialSubmit(e, activeProject.id)} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Title / Label *</label>
+                  <input
+                    required
+                    type="text"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                    placeholder="e.g. Staging DB credentials, Figma Design Link"
+                    value={credentialFormData.title}
+                    onChange={(e) => setCredentialFormData({ ...credentialFormData, title: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Category *</label>
+                    <select
+                      required
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-slate-700 appearance-none bg-white"
+                      value={credentialFormData.category}
+                      onChange={(e) => setCredentialFormData({ ...credentialFormData, category: e.target.value as any })}
+                    >
+                      <option value="API Key">API Key</option>
+                      <option value="Hosting/Server">Hosting / Server</option>
+                      <option value="Database">Database</option>
+                      <option value="Repository">Repository</option>
+                      <option value="Domain">Domain</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Host / URL (Optional)</label>
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                      placeholder="e.g. 192.168.1.1 or https://..."
+                      value={credentialFormData.hostOrUrl}
+                      onChange={(e) => setCredentialFormData({ ...credentialFormData, hostOrUrl: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Username / Key</label>
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                      placeholder="e.g. admin or access_key_id"
+                      value={credentialFormData.usernameOrKey}
+                      onChange={(e) => setCredentialFormData({ ...credentialFormData, usernameOrKey: e.target.value })}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Password / Secret Key</label>
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all"
+                      placeholder="e.g. pass123 or secret_key"
+                      value={credentialFormData.passwordOrSecret}
+                      onChange={(e) => setCredentialFormData({ ...credentialFormData, passwordOrSecret: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 pl-1">Notes / Special Instructions</label>
+                  <textarea
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium h-24 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all resize-none"
+                    placeholder="e.g. VPN required, use staging profile..."
+                    value={credentialFormData.notes}
+                    onChange={(e) => setCredentialFormData({ ...credentialFormData, notes: e.target.value })}
+                  />
+                </div>
+
+                <div className="flex gap-4 pt-4 border-t border-slate-100 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingCredential(false);
+                      setEditingCredential(null);
+                    }}
+                    className="flex-1 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 font-bold rounded-2xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {submitting ? 'Saving...' : editingCredential ? 'Update' : 'Register'}
                   </button>
                 </div>
               </form>

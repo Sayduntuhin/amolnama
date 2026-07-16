@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   BarChart, 
   Bar, 
@@ -30,19 +31,20 @@ import {
   ChevronDown,
   ChevronUp,
   Target,
-  FileText
+  FileText,
+  Database
 } from 'lucide-react';
 import { projectService } from '@/src/services/projectService';
 import { developerService } from '@/src/services/developerService';
 import { progressService } from '@/src/services/progressService';
 import { adminService } from '@/src/services/adminService';
+import { leaderService } from '@/src/services/leaderService';
 import { Project, Developer, PhaseTracking, DailyProgress, Shift, Issue } from '@/src/types';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, calculateProjectAge, formatDateForInput, resolvePhaseStatus, resolveProjectStatus, getGMT6Date, getGMT6DateString } from '@/src/lib/utils';
+import { cn, calculateProjectAge, formatDateForInput, resolvePhaseStatus, resolveProjectStatus, getGMT6Date, getGMT6DateString, formatDate } from '@/src/lib/utils';
 import { useSnackbar } from '@/src/components/Snackbar';
 import { collection, getDocs, query } from 'firebase/firestore';
 import { db, auth } from '@/src/lib/firebase';
-import { leaderService } from '@/src/services/leaderService';
 
 function CountdownTimer({ targetDate }: { targetDate: string }) {
   const [timeLeft, setTimeLeft] = useState<string>('');
@@ -51,6 +53,10 @@ function CountdownTimer({ targetDate }: { targetDate: string }) {
     const calculateTime = () => {
       const now = new Date().getTime();
       const target = new Date(targetDate).getTime();
+      if (isNaN(target)) {
+        setTimeLeft('Invalid Date');
+        return;
+      }
       const difference = target - now;
 
       if (difference <= 0) {
@@ -119,7 +125,18 @@ export function Dashboard() {
   const [issueStatusFilter, setIssueStatusFilter] = useState<string>('All');
   const [dailyLogs, setDailyLogs] = useState<DailyProgress[]>([]);
   const [wipSchedule, setWipSchedule] = useState<any[]>([]);
+  const [allDeliveredMilestones, setAllDeliveredMilestones] = useState<any[]>([]);
   const [redZoneMilestones, setRedZoneMilestones] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'overview' | 'milestones' | 'kpis' | 'issues'>('overview');
+
+  const getOwnerDetails = (ownerId: string) => {
+    const admin = admins.find(a => (a.uid || a.id) === ownerId);
+    const leader = leaders.find(l => (l.uid || l.id) === ownerId);
+    return {
+      adminName: admin ? admin.name : 'Unknown Admin',
+      leaderName: leader ? leader.name : 'No Leader Assigned'
+    };
+  };
   const [kpiMetrics, setKpiMetrics] = useState<{ 
     monthlyKpi: Record<string, number>, 
     topDevelopers: any[], 
@@ -128,10 +145,19 @@ export function Dashboard() {
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    loadData();
+    (async () => {
+      try {
+        await loadData();
+      } catch (e) {
+        console.error('Dashboard loadData unexpected error:', e);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   const isSuperAdmin = auth.currentUser?.email?.toLowerCase().trim() === 'exceptionhubjvai@gmail.com';
+
 
   const criticalFiverrMilestones = React.useMemo(() => {
     return wipSchedule.filter(m => {
@@ -153,17 +179,16 @@ export function Dashboard() {
         const superAdminUid = auth.currentUser?.uid;
         const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
         let adminUid = selectedAdmin?.uid;
-        if (selectedAdmin?.email?.toLowerCase().trim() === 'exceptionhubjvai@gmail.com') {
+        if (selectedAdmin?.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
           adminUid = superAdminUid;
         }
-        if (adminUid) {
-          temp = temp.filter(p => p.ownerId === adminUid);
-        } else if (selectedAdmin?.email?.toLowerCase().trim() === 'sayduntuhin.jvai@gmail.com') {
-          const otherAdminUids = admins
-            .filter(a => (a.uid || a.id) !== selectedAdminFilter && a.uid)
-            .map(a => a.uid);
-          temp = temp.filter(p => p.ownerId !== superAdminUid && !otherAdminUids.includes(p.ownerId));
-        }
+        const targetOwnerId = adminUid || selectedAdmin?.id;
+        
+        const adminLeaders = leaders.filter(l => l.creatorId === targetOwnerId);
+        const leaderUids = adminLeaders.map(l => l.uid).filter(Boolean);
+        const leaderIds = adminLeaders.map(l => l.id);
+        
+        temp = temp.filter(p => p.ownerId === targetOwnerId || leaderUids.includes(p.ownerId) || leaderIds.includes(p.ownerId));
       }
       if (selectedLeaderFilter !== 'All') {
         const selectedLeader = leaders.find(l => (l.uid || l.id) === selectedLeaderFilter);
@@ -205,17 +230,16 @@ export function Dashboard() {
         const superAdminUid = auth.currentUser?.uid;
         const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
         let adminUid = selectedAdmin?.uid;
-        if (selectedAdmin?.email?.toLowerCase().trim() === 'exceptionhubjvai@gmail.com') {
+        if (selectedAdmin?.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
           adminUid = superAdminUid;
         }
-        if (adminUid) {
-          temp = temp.filter(d => d.ownerId === adminUid);
-        } else if (selectedAdmin?.email?.toLowerCase().trim() === 'sayduntuhin.jvai@gmail.com') {
-          const otherAdminUids = admins
-            .filter(a => (a.uid || a.id) !== selectedAdminFilter && a.uid)
-            .map(a => a.uid);
-          temp = temp.filter(d => d.ownerId !== superAdminUid && !otherAdminUids.includes(d.ownerId));
-        }
+        const targetOwnerId = adminUid || selectedAdmin?.id;
+        
+        const adminLeaders = leaders.filter(l => l.creatorId === targetOwnerId);
+        const leaderUids = adminLeaders.map(l => l.uid).filter(Boolean);
+        const leaderIds = adminLeaders.map(l => l.id);
+        
+        temp = temp.filter(d => d.ownerId === targetOwnerId || leaderUids.includes(d.ownerId) || leaderIds.includes(d.ownerId));
       }
       if (selectedLeaderFilter !== 'All') {
         const selectedLeader = leaders.find(l => (l.uid || l.id) === selectedLeaderFilter);
@@ -257,17 +281,16 @@ export function Dashboard() {
         const superAdminUid = auth.currentUser?.uid;
         const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
         let adminUid = selectedAdmin?.uid;
-        if (selectedAdmin?.email?.toLowerCase().trim() === 'exceptionhubjvai@gmail.com') {
+        if (selectedAdmin?.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
           adminUid = superAdminUid;
         }
-        if (adminUid) {
-          temp = temp.filter(log => log.ownerId === adminUid);
-        } else if (selectedAdmin?.email?.toLowerCase().trim() === 'sayduntuhin.jvai@gmail.com') {
-          const otherAdminUids = admins
-            .filter(a => (a.uid || a.id) !== selectedAdminFilter && a.uid)
-            .map(a => a.uid);
-          temp = temp.filter(log => log.ownerId !== superAdminUid && !otherAdminUids.includes(log.ownerId));
-        }
+        const targetOwnerId = adminUid || selectedAdmin?.id;
+        
+        const adminLeaders = leaders.filter(l => l.creatorId === targetOwnerId);
+        const leaderUids = adminLeaders.map(l => l.uid).filter(Boolean);
+        const leaderIds = adminLeaders.map(l => l.id);
+        
+        temp = temp.filter(log => log.ownerId === targetOwnerId || leaderUids.includes(log.ownerId) || leaderIds.includes(log.ownerId));
       }
       if (selectedLeaderFilter !== 'All') {
         const selectedLeader = leaders.find(l => (l.uid || l.id) === selectedLeaderFilter);
@@ -297,6 +320,40 @@ export function Dashboard() {
       return [];
     }
   }, [dailyLogs, selectedAdminFilter, selectedLeaderFilter, isSuperAdmin, currentLeader, admins, leaders]);
+
+  const visibleLeaders = React.useMemo(() => {
+    if (!isSuperAdmin || selectedAdminFilter === 'All') {
+      return leaders;
+    }
+    const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
+    if (!selectedAdmin) return [];
+    
+    const superAdminUid = auth.currentUser?.uid;
+    let adminUid = selectedAdmin.uid;
+    if (selectedAdmin.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
+      adminUid = superAdminUid;
+    }
+    const targetOwnerId = adminUid || selectedAdmin.id;
+    return leaders.filter(l => l.creatorId === targetOwnerId);
+  }, [leaders, isSuperAdmin, selectedAdminFilter, admins]);
+
+  useEffect(() => {
+    if (isSuperAdmin && selectedAdminFilter !== 'All' && selectedLeaderFilter !== 'All') {
+      const selectedAdmin = admins.find(a => (a.uid || a.id) === selectedAdminFilter);
+      if (selectedAdmin) {
+        const superAdminUid = auth.currentUser?.uid;
+        let adminUid = selectedAdmin.uid;
+        if (selectedAdmin.email?.toLowerCase()?.trim() === 'exceptionhubjvai@gmail.com') {
+          adminUid = superAdminUid;
+        }
+        const targetOwnerId = adminUid || selectedAdmin.id;
+        const belongsToSelectedAdmin = leaders.some(l => (l.uid || l.id) === selectedLeaderFilter && l.creatorId === targetOwnerId);
+        if (!belongsToSelectedAdmin) {
+          setSelectedLeaderFilter('All');
+        }
+      }
+    }
+  }, [selectedAdminFilter, isSuperAdmin, admins, leaders, selectedLeaderFilter]);
 
   const filteredAllProjectPhases = React.useMemo(() => {
     const allowedProjIds = new Set(filteredProjects.map(p => p.id));
@@ -455,7 +512,7 @@ export function Dashboard() {
       if (!project) return;
       const phases = (item as any).phases || [];
       phases.forEach((phase: PhaseTracking) => {
-        if (phase.extensions && phase.extensions.length > 0) {
+        if (phase.extensions && Array.isArray(phase.extensions) && phase.extensions.length > 0) {
           phase.extensions.forEach((ext: any) => {
             list.push({
               ...ext,
@@ -470,7 +527,16 @@ export function Dashboard() {
         }
       });
     });
-    return list.sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime());
+    const getMs = (dateVal: any) => {
+      if (!dateVal) return 0;
+      if (typeof dateVal === 'string') return new Date(dateVal).getTime() || 0;
+      if (dateVal instanceof Date) return dateVal.getTime() || 0;
+      if (dateVal.toDate && typeof dateVal.toDate === 'function') return dateVal.toDate().getTime() || 0;
+      if (dateVal.seconds !== undefined) return dateVal.seconds * 1000;
+      const t = new Date(String(dateVal)).getTime();
+      return isNaN(t) ? 0 : t;
+    };
+    return list.sort((a, b) => getMs(b.createdAt) - getMs(a.createdAt));
   }, [filteredAllProjectPhases, filteredProjects]);
 
   const calculateStats = () => {
@@ -503,7 +569,7 @@ export function Dashboard() {
           if (!pStats[phase.phaseName]) {
             pStats[phase.phaseName] = { wipCount: 0, wipValue: 0, deliveredCount: 0, deliveredValue: 0 };
           }
-          if (phase.status === 'In Progress' || phase.status === 'Delayed' || phase.status === 'Extension Requested') {
+          if (phase.status === 'In Progress' || phase.status === 'Delayed' || phase.status === 'Extension Requested' || phase.status === 'Ready for Delivery') {
             pStats[phase.phaseName].wipCount++;
             pStats[phase.phaseName].wipValue += phase.value || 0;
             
@@ -547,8 +613,11 @@ export function Dashboard() {
     // Calculate Monthly Statistics
     const mStatsMap: Record<string, any> = {};
     const ensureMonth = (date: any) => {
-      const dateStr = formatDateForInput(date) || new Date().toISOString().split('T')[0];
-      const monthKey = dateStr.slice(0, 7);
+      let dateStr = formatDateForInput(date) || new Date().toISOString().split('T')[0];
+      let monthKey = dateStr.slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(monthKey) || isNaN(new Date(monthKey + '-01').getTime())) {
+        monthKey = new Date().toISOString().slice(0, 7);
+      }
       if (!mStatsMap[monthKey]) {
         mStatsMap[monthKey] = {
           month: monthKey,
@@ -572,12 +641,12 @@ export function Dashboard() {
     filteredAllProjectPhases.filter(res => filteredProjectIds.has(res.projectId)).forEach(res => {
       const project = filteredProjects.find(p => p.id === res.projectId);
       res.phases.forEach(ph => {
-        if ((ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested') && ph.startDate) {
+        if ((ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested' || ph.status === 'Ready for Delivery') && ph.startDate) {
           const m = ensureMonth(ph.startDate);
           mStatsMap[m].wipVolume += (ph.value || 0) * 0.8;
           mStatsMap[m].activeCapacity++;
         } else if (ph.status === 'Delivered') {
-          const deliveryTime = project?.deliveryDate || ph.endDate || ph.startDate || '';
+          const deliveryTime = ph.endDate || ph.actualDeliveryDate || project?.deliveryDate || ph.startDate || '';
           if (deliveryTime) {
             const m = ensureMonth(deliveryTime);
             mStatsMap[m].deliveredTotal += (ph.value || 0) * 0.8;
@@ -591,7 +660,7 @@ export function Dashboard() {
     setMonthlyData(mData);
 
     const wipAmount = filteredAllProjectPhases.filter(res => filteredProjectIds.has(res.projectId)).reduce((acc, curr) => 
-      acc + curr.phases.filter(ph => ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested').reduce((accPh, ph) => accPh + (ph.value || 0), 0), 0
+      acc + curr.phases.filter(ph => ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested' || ph.status === 'Ready for Delivery').reduce((accPh, ph) => accPh + (ph.value || 0), 0), 0
     ) * 0.8;
     const deliveredAmount = filteredAllProjectPhases.filter(res => filteredProjectIds.has(res.projectId)).reduce((acc, curr) => 
       acc + curr.phases.filter(ph => ph.status === 'Delivered').reduce((accPh, ph) => accPh + (ph.value || 0), 0), 0
@@ -601,7 +670,7 @@ export function Dashboard() {
     filteredAllProjectPhases.filter(res => filteredProjectIds.has(res.projectId)).forEach(res => {
       const project = filteredProjects.find(p => p.id === res.projectId);
       res.phases.forEach(ph => {
-        if ((ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested') && ph.expectedDeliveryDate) {
+        if ((ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested' || ph.status === 'Ready for Delivery') && ph.expectedDeliveryDate) {
           activeMilestones.push({
             ...ph,
             actualDeliveryDate: ph.actualDeliveryDate || ph.expectedDeliveryDate,
@@ -616,6 +685,35 @@ export function Dashboard() {
     activeMilestones.sort((a, b) => new Date(a.expectedDeliveryDate).getTime() - new Date(b.expectedDeliveryDate).getTime());
     setWipSchedule(activeMilestones);
 
+    const deliveredMilestones: any[] = [];
+    filteredAllProjectPhases.filter(res => filteredProjectIds.has(res.projectId)).forEach(res => {
+      const project = filteredProjects.find(p => p.id === res.projectId);
+      res.phases.forEach(ph => {
+        if (ph.status === 'Delivered') {
+          const deliveryTime = ph.endDate || ph.actualDeliveryDate || project?.deliveryDate || ph.startDate || '';
+          const formattedDelivery = formatDateForInput(deliveryTime);
+          if (formattedDelivery) {
+            const m = formattedDelivery.slice(0, 7); // YYYY-MM
+            deliveredMilestones.push({
+              ...ph,
+              deliveryDate: deliveryTime,
+              month: m,
+              clientName: project?.clientName || 'Unknown Client',
+              projectIdAlias: project?.projectId || 'N/A',
+              parentProjectId: res.projectId,
+              ownerId: project?.ownerId
+            });
+          }
+        }
+      });
+    });
+    deliveredMilestones.sort((a, b) => {
+      const aTime = formatDateForInput(a.deliveryDate);
+      const bTime = formatDateForInput(b.deliveryDate);
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
+    setAllDeliveredMilestones(deliveredMilestones);
+
     const monthlyKpiMap: Record<string, number> = {};
     const devKpiMap: Record<string, number> = {};
     const projectKpiMap: Record<string, number> = {};
@@ -623,7 +721,7 @@ export function Dashboard() {
     filteredAllProjectPhases.filter(res => filteredProjectIds.has(res.projectId)).forEach(res => {
       const project = filteredProjects.find(p => p.id === res.projectId);
       res.phases.forEach(ph => {
-        if (ph.status === 'Delivered' && ph.kpiAllocations) {
+        if (ph.status === 'Delivered' && ph.kpiAllocations && Array.isArray(ph.kpiAllocations)) {
           const mKey = ph.month || 'Other';
           ph.kpiAllocations.forEach(alloc => {
             const kpiVal = alloc.value || 0;
@@ -662,7 +760,7 @@ export function Dashboard() {
       delivered: filteredProjectsForCalc.filter(p => p.status === 'Delivered' || p.status === 'Complete').length,
       deliveredAmount: deliveredAmount,
       cancelled: filteredProjectsForCalc.filter(p => p.status === 'Cancelled').length,
-      workload: filteredAllProjectPhases.filter(res => filteredProjectIds.has(res.projectId)).reduce((acc, curr) => acc + curr.phases.filter(ph => ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested').length, 0),
+      workload: filteredAllProjectPhases.filter(res => filteredProjectIds.has(res.projectId)).reduce((acc, curr) => acc + curr.phases.filter(ph => ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested' || ph.status === 'Ready for Delivery').length, 0),
       totalPortfolioValue: filteredProjectsForCalc.reduce((acc, curr) => acc + (curr.amount || 0), 0) * 0.8,
       totalOpenIssues: totalIssues,
       avgMilestoneAge: activeMilestoneCount > 0 ? Math.round(totalMilestoneAge / activeMilestoneCount) : 0,
@@ -697,7 +795,7 @@ export function Dashboard() {
       if (!project) return;
       
       item.phases.forEach(ph => {
-        if ((ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested') && ph.developerIds) {
+        if ((ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested') && ph.developerIds && Array.isArray(ph.developerIds)) {
           ph.developerIds.forEach(devId => {
             if (!activeDevMilestones[devId]) {
               activeDevMilestones[devId] = [];
@@ -811,7 +909,7 @@ export function Dashboard() {
                 ) : (
                   <option value="All">All Leaders</option>
                 )}
-                {leaders.map(leader => (
+                {visibleLeaders.map(leader => (
                   <option key={leader.id} value={leader.uid || leader.id}>{leader.name}</option>
                 ))}
               </select>
@@ -852,15 +950,27 @@ export function Dashboard() {
               onChange={(e) => setSelectedMonth(e.target.value)}
               className="bg-transparent text-xs font-bold text-slate-700 px-3 py-1 outline-none border-none cursor-pointer w-full"
             >
-              {[...new Set([...monthlyData.map(d => d.month), new Date().toISOString().slice(0, 7)])].sort().reverse().map(m => (
-                <option key={m} value={m}>{new Date(m + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</option>
-              ))}
+              {[...new Set([...monthlyData.map(d => d.month), new Date().toISOString().slice(0, 7)])].sort().reverse().map(m => {
+                let displayLabel = m;
+                try {
+                  const dObj = new Date(m + '-01');
+                  if (!isNaN(dObj.getTime())) {
+                    displayLabel = dObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                  }
+                } catch (err) {
+                  console.warn("Failed to format month option label:", err);
+                }
+                return (
+                  <option key={m} value={m}>{displayLabel}</option>
+                );
+              })}
             </select>
           </div>
           <button className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors shadow-sm w-full sm:w-auto">
             <Activity className="w-4 h-4" />
             Live Monitor
           </button>
+
         </div>
       </div>
 
@@ -884,7 +994,7 @@ export function Dashboard() {
                     const days = getDaysRemaining(m.actualDeliveryDate || m.expectedDeliveryDate);
                     return (
                       <li key={idx}>
-                        <strong>{m.clientName}</strong> ({m.phaseName}) — {days < 0 ? `${Math.abs(days)} days overdue!` : `${days} days left`} (Fiverr Due: {new Date(m.actualDeliveryDate || m.expectedDeliveryDate).toLocaleDateString()})
+                        <strong>{m.clientName}</strong> ({m.phaseName}) — {days < 0 ? `${Math.abs(days)} days overdue!` : `${days} days left`} (Fiverr Due: {formatDate(m.actualDeliveryDate || m.expectedDeliveryDate)})
                       </li>
                     );
                   })}
@@ -970,8 +1080,93 @@ export function Dashboard() {
         />
       </div>
 
+      {/* Interactive Tab Switcher Navigation */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white/80 backdrop-blur-md p-2.5 rounded-3xl border border-slate-200/60 shadow-sm my-6">
+        <div className="flex flex-wrap gap-1.5 w-full sm:w-auto">
+          <button
+            onClick={() => setActiveTab('overview')}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all duration-300 active:scale-95 cursor-pointer",
+              activeTab === 'overview' 
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" 
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            )}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            Overview & Analytics
+          </button>
+          <button
+            onClick={() => setActiveTab('milestones')}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all duration-300 active:scale-95 relative cursor-pointer",
+              activeTab === 'milestones' 
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" 
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            )}
+          >
+            <Layers className="w-4 h-4" />
+            Milestones & Ops
+            {wipSchedule.length + allExtensions.length > 0 && (
+              <span className={cn(
+                "px-2 py-0.5 rounded-full text-[8px] font-black font-mono shrink-0",
+                activeTab === 'milestones' ? "bg-white/30 text-white" : "bg-indigo-100 text-indigo-700"
+              )}>
+                {wipSchedule.length + allExtensions.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('kpis')}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all duration-300 active:scale-95 cursor-pointer",
+              activeTab === 'kpis' 
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" 
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            )}
+          >
+            <Target className="w-4 h-4" />
+            KPI Intelligence
+          </button>
+          <button
+            onClick={() => setActiveTab('issues')}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all duration-300 active:scale-95 relative cursor-pointer",
+              activeTab === 'issues' 
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" 
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            )}
+          >
+            <AlertTriangle className="w-4 h-4" />
+            Risks & Issues
+            {stats.totalOpenIssues + stats.redZoneCount > 0 && (
+              <span className={cn(
+                "px-2 py-0.5 rounded-full text-[8px] font-black font-mono shrink-0 animate-pulse",
+                activeTab === 'issues' ? "bg-white/30 text-white" : "bg-rose-100 text-rose-700"
+              )}>
+                {stats.totalOpenIssues + stats.redZoneCount}
+              </span>
+            )}
+          </button>
+        </div>
+        
+        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-3">
+          Active Tab: {activeTab === 'overview' ? 'Overview & Performance' : activeTab === 'milestones' ? 'Operational Milestones' : activeTab === 'kpis' ? 'KPI Contribution' : 'Risk & Issues Registry'}
+        </div>
+      </div>
+
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -15 }}
+          transition={{ duration: 0.25 }}
+          className="space-y-8"
+        >
+
+
       {/* Missed Daily Updates Board */}
-      {missedUpdates.length > 0 && (
+      {activeTab === 'issues' && missedUpdates.length > 0 && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3 font-sans">
@@ -1040,7 +1235,7 @@ export function Dashboard() {
       )}
 
       {/* Red Zone Alerts */}
-      {redZoneMilestones.length > 0 && (
+      {activeTab === 'issues' && redZoneMilestones.length > 0 && (
         <div id="red-zone-section" className="space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -1103,7 +1298,8 @@ export function Dashboard() {
       )}
 
       {/* Monthly Chart Section */}
-      <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group">
+      {activeTab === 'overview' && (
+        <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden group">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10 relative z-10">
           <div>
             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -1137,7 +1333,14 @@ export function Dashboard() {
                 axisLine={false} 
                 tickLine={false} 
                 tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 900 }}
-                tickFormatter={(val) => new Date(val + '-01').toLocaleDateString('en-US', { month: 'short' })}
+                tickFormatter={(val) => {
+                  try {
+                    const d = new Date(val + '-01');
+                    return isNaN(d.getTime()) ? val : d.toLocaleDateString('en-US', { month: 'short' });
+                  } catch (e) {
+                    return val;
+                  }
+                }}
               />
               <YAxis 
                 axisLine={false} 
@@ -1155,7 +1358,14 @@ export function Dashboard() {
                   padding: '20px'
                 }}
                 labelStyle={{ color: '#0f172a', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', marginBottom: '12px', letterSpacing: '0.1em' }}
-                labelFormatter={(val) => new Date(val + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                labelFormatter={(val) => {
+                  try {
+                    const d = new Date(val + '-01');
+                    return isNaN(d.getTime()) ? val : d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                  } catch (e) {
+                    return val;
+                  }
+                }}
               />
               <Bar dataKey="portfolioValue" name="Portfolio Value" fill="#0f172a" radius={[6, 6, 0, 0]} barSize={24} />
               <Bar dataKey="deliveredTotal" name="Delivered Total" fill="#10b981" radius={[6, 6, 0, 0]} barSize={24} />
@@ -1165,8 +1375,11 @@ export function Dashboard() {
         </div>
       </div>
 
+      )}
+
       {/* KPI Intelligence Section */}
-      <div className="space-y-6 lg:space-y-8">
+      {activeTab === 'kpis' && (
+        <div className="space-y-6 lg:space-y-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
             <div className="w-2 h-8 bg-emerald-500 rounded-full" />
@@ -1255,8 +1468,11 @@ export function Dashboard() {
         </div>
       </div>
 
+      )}
+
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+      {activeTab === 'overview' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Status Distribution */}
         <div className="bg-white p-6 md:p-8 rounded-2xl md:rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center">
           <h3 className="text-lg font-bold text-slate-800 mb-8 self-start tracking-tight">Project Status</h3>
@@ -1314,7 +1530,7 @@ export function Dashboard() {
               );
               
               const totalValue = devPhases.reduce((acc, ph) => acc + (ph.value || 0), 0);
-              const activeCount = devPhases.filter(ph => ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested').length;
+              const activeCount = devPhases.filter(ph => ph.status === 'In Progress' || ph.status === 'Delayed' || ph.status === 'Extension Requested' || ph.status === 'Ready for Delivery').length;
               
               return (
                 <div key={`${dev.id}-${idx}`} className="space-y-3">
@@ -1343,8 +1559,11 @@ export function Dashboard() {
         </div>
       </div>
 
+      )}
+
       {/* Milestone Stats Section */}
-      <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      {activeTab === 'overview' && (
+        <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 md:p-8 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-lg font-bold text-slate-800 tracking-tight">Milestone Performance Matrix</h3>
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-1 rounded">Execution Layer</span>
@@ -1410,8 +1629,11 @@ export function Dashboard() {
         </div>
       </div>
 
+      )}
+
       {/* Developer Daily Activity Hub */}
-      <div className="space-y-6">
+      {activeTab === 'milestones' && (
+        <div className="space-y-6">
           <div className="flex items-center justify-between font-sans">
             <div>
               <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -1429,12 +1651,19 @@ export function Dashboard() {
             {filteredDailyLogs.slice(0, 15).map(log => {
               const dev = filteredDevelopers.find(d => d.id === log.developerId);
               const project = filteredProjects.find(p => p.id === log.projectId);
-              const dateObj = new Date(log.date);
-              const formattedDate = new Intl.DateTimeFormat('en-US', { 
-                weekday: 'short', 
-                month: 'short', 
-                day: 'numeric' 
-              }).format(dateObj);
+              let formattedDate = 'N/A';
+              try {
+                const dateObj = new Date(log.date);
+                if (!isNaN(dateObj.getTime())) {
+                  formattedDate = new Intl.DateTimeFormat('en-US', { 
+                    weekday: 'short', 
+                    month: 'short', 
+                    day: 'numeric' 
+                  }).format(dateObj);
+                }
+              } catch (err) {
+                console.warn("Failed to format daily log date:", log.date, err);
+              }
 
               return (
                 <div key={log.id} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm hover:shadow-lg transition-all flex flex-col md:flex-row gap-5 relative overflow-hidden group">
@@ -1544,8 +1773,11 @@ export function Dashboard() {
           </div>
        </div>
 
+      )}
+
       {/* Dev-Driven Central Issue Tracker Control Console */}
-      <div className="space-y-6 my-12">
+      {activeTab === 'issues' && (
+        <div className="space-y-6 my-12">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 font-sans">
           <div>
             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -1725,8 +1957,11 @@ export function Dashboard() {
         </div>
       </div>
 
+      )}
+
       {/* Executive Central Timeline Extension Approval Control Panel */}
-      <div id="timeline-extensions" className="space-y-6 my-12 scroll-mt-6">
+      {activeTab === 'milestones' && (
+        <div id="timeline-extensions" className="space-y-6 my-12 scroll-mt-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 font-sans">
           <div>
             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -1779,7 +2014,7 @@ export function Dashboard() {
                       {isPending ? "Pending Review" : isRejected ? "Rejected" : "Approved"}
                     </span>
                     <span className="text-[9px] font-bold text-slate-400 italic">
-                      {new Date(ext.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {formatDate(ext.createdAt)}
                     </span>
                   </div>
 
@@ -1863,8 +2098,88 @@ export function Dashboard() {
         </div>
       </div>
 
+      )}
+
+      {/* Delivered Milestones for Selected Month */}
+      {activeTab === 'milestones' && (() => {
+        let selectedMonthLabel = selectedMonth;
+        try {
+          const dObj = new Date(selectedMonth + '-01');
+          if (!isNaN(dObj.getTime())) {
+            selectedMonthLabel = dObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+          }
+        } catch (err) {
+          console.warn("Failed to format selected month label:", err);
+        }
+        const currentDeliveredMilestones = allDeliveredMilestones.filter(m => m.month === selectedMonth);
+        return (
+          <div className="space-y-6 my-12">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
+                <div className="w-2 h-8 bg-emerald-600 rounded-full animate-pulse" />
+                Delivered Milestones ({selectedMonthLabel})
+              </h3>
+              <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-150 font-mono">
+                {currentDeliveredMilestones.length} Delivered
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {currentDeliveredMilestones.map((milestone, idx) => {
+                const ownerInfo = getOwnerDetails(milestone.ownerId);
+                return (
+                  <Link 
+                    to={`/projects/${milestone.parentProjectId}`} 
+                    key={`delivered-card-${milestone.parentProjectId}-${idx}`}
+                    className="bg-white rounded-[2rem] border border-slate-200 p-6 shadow-sm hover:shadow-xl hover:border-emerald-300 transition-all duration-300 group overflow-hidden relative block"
+                  >
+                    <div className="absolute top-0 left-0 w-full h-1 bg-emerald-100 group-hover:bg-emerald-500 transition-colors" />
+                    
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-650 font-bold border border-emerald-100 group-hover:scale-105 transition-transform">
+                        {milestone.clientName[0]}
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900 tracking-tight line-clamp-1 group-hover:text-emerald-605 transition-colors">{milestone.clientName}</h4>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-0.5">{milestone.phaseName} • {milestone.orderId || milestone.projectIdAlias}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 mb-4">
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md border border-slate-200">Admin: {ownerInfo.adminName}</span>
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-indigo-50/70 text-indigo-600 rounded-md border border-indigo-100">Team: {ownerInfo.leaderName}</span>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 group-hover:bg-white group-hover:border-emerald-200 transition-all space-y-2">
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
+                        <span className="text-slate-400">Date Delivered</span>
+                        <span className="text-emerald-650 font-black">{formatDate(milestone.deliveryDate)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
+                        <span className="text-slate-400">Net Value</span>
+                        <span className="text-slate-900 font-black">${Math.round((milestone.value || 0) * 0.8).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
+                        <span className="text-slate-400">Gross Value</span>
+                        <span className="text-slate-500 font-bold">${(milestone.value || 0).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+              {currentDeliveredMilestones.length === 0 && (
+                <div className="col-span-full py-12 text-center bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
+                  <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">No milestones delivered in {selectedMonthLabel}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Active Milestones Countdown */}
-      <div className="space-y-6">
+      {activeTab === 'milestones' && (
+        <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
               <div className="w-2 h-8 bg-amber-500 rounded-full" />
@@ -1919,11 +2234,11 @@ export function Dashboard() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
                        <span className="text-slate-400">Target Delivery</span>
-                       <span className="text-slate-900">{new Date(milestone.expectedDeliveryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                       <span className="text-slate-900">{formatDate(milestone.expectedDeliveryDate)}</span>
                     </div>
                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
                        <span className="text-rose-500">Fiverr Deadline</span>
-                       <span className="text-slate-900">{new Date(milestone.actualDeliveryDate || milestone.expectedDeliveryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                       <span className="text-slate-900">{formatDate(milestone.actualDeliveryDate || milestone.expectedDeliveryDate)}</span>
                     </div>
                     {(() => {
                       const days = getDaysRemaining(milestone.actualDeliveryDate || milestone.expectedDeliveryDate);
@@ -1954,7 +2269,10 @@ export function Dashboard() {
                </div>
             )}
           </div>
-      </div>
+        </div>
+      )}
+      </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
