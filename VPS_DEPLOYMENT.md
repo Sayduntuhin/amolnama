@@ -72,7 +72,7 @@ Switch back to your **VPS SSH terminal**, navigate to the project directory, and
 cd /var/www/jvai-management
 
 # Create the host env configuration file
-echo "PORT=3000" > .env
+echo "PORT=4000" > .env
 echo "NODE_ENV=production" >> .env
 # (Optional: Add your Gemini API Key)
 # echo "GEMINI_API_KEY=your_key" >> .env
@@ -89,7 +89,7 @@ docker compose up -d --build
 ---
 
 ## 5. Nginx Reverse Proxy Setup (`amolnama.jvaisite.com`)
-Configure Nginx to map port 80 requests for your domain to the Docker container running on port 3000.
+Configure Nginx to map port 80 requests for your domain to the Docker container running on port 4000.
 
 1. **Install Nginx:**
    ```bash
@@ -108,7 +108,7 @@ Configure Nginx to map port 80 requests for your domain to the Docker container 
        server_name amolnama.jvaisite.com;
 
        location / {
-           proxy_pass http://localhost:3000;
+           proxy_pass http://localhost:4000;
            proxy_http_version 1.1;
            proxy_set_header Upgrade $http_upgrade;
            proxy_set_header Connection 'upgrade';
