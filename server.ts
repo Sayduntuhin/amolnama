@@ -33,6 +33,12 @@ async function startServer() {
     return cachedDbData;
   };
 
+  // Diagnostics check for SMTP variables on boot
+  console.log("[SMTP Boot Config Check]:");
+  console.log(`- SMTP_HOST: ${process.env.SMTP_HOST ? "LOADED (" + process.env.SMTP_HOST + ")" : "MISSING"}`);
+  console.log(`- SMTP_USER: ${process.env.SMTP_USER ? "LOADED" : "MISSING"}`);
+  console.log(`- SMTP_PASS: ${process.env.SMTP_PASS ? "LOADED" : "MISSING"}`);
+
   const saveDbData = (dbPath: string, data: any) => {
     cachedDbData = data;
     // Asynchronous non-blocking save to disk
