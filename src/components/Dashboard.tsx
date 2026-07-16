@@ -1023,12 +1023,19 @@ export function Dashboard() {
               </p>
             </div>
           </div>
-          <a 
-            href="#timeline-extensions" 
-            className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase tracking-widest rounded-xl transition-all shadow-md hover:shadow-lg active:scale-95 shrink-0"
+          <button 
+            type="button"
+            onClick={() => {
+              setActiveTab('milestones');
+              setTimeout(() => {
+                const el = document.getElementById('timeline-extensions');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }, 100);
+            }}
+            className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase tracking-widest rounded-xl transition-all shadow-md hover:shadow-lg active:scale-95 shrink-0 cursor-pointer"
           >
             Review Requests
-          </a>
+          </button>
         </motion.div>
       )}
 

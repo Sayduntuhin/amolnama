@@ -17,11 +17,7 @@ export function Login({ initialError }: { initialError?: string }) {
   const [error, setError] = useState(initialError || '');
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
-  const [isImportPanelOpen, setIsImportPanelOpen] = useState(false);
-  const [fbEmail, setFbEmail] = useState('exceptionhubjvai@gmail.com');
-  const [fbPassword, setFbPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showFbPassword, setShowFbPassword] = useState(false);
   const [isForgotMode, setIsForgotMode] = useState(false);
   const [resetKey, setResetKey] = useState('');
   const [showResetKey, setShowResetKey] = useState(false);
@@ -45,29 +41,7 @@ export function Login({ initialError }: { initialError?: string }) {
     }
   };
 
-  const handleImportFromFirebase = async (useGoogle = true) => {
-    setLoading(true);
-    setError('');
-    setSuccessMessage('');
-    try {
-      const { runFirebaseImport } = await import('@/src/lib/firebase');
-      if (useGoogle) {
-        await runFirebaseImport();
-      } else {
-        if (!fbEmail || !fbPassword) {
-          throw new Error("Please enter both Firebase admin email and password.");
-        }
-        await runFirebaseImport(fbEmail, fbPassword);
-      }
-      setSuccessMessage('Database successfully imported! You can now log in using your default passwords (e.g. jvai2026 for Super Admin).');
-      setIsImportPanelOpen(false);
-    } catch (err: any) {
-      console.error("Firebase import failed:", err);
-      setError("Import failed: " + (err.message || String(err)));
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -389,83 +363,7 @@ export function Login({ initialError }: { initialError?: string }) {
                   : 'Set up Password'}
               </button>
 
-              <div className="border-t border-slate-100 my-2 pt-4">
-                {!isImportPanelOpen ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsImportPanelOpen(true)}
-                    disabled={loading}
-                    className="w-full py-4 bg-slate-900 text-white hover:bg-slate-800 transition-colors rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-slate-900/10"
-                  >
-                    Import Data from Firebase
-                  </button>
-                ) : (
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-left space-y-4">
-                    <p className="text-[10px] font-black text-indigo-600 uppercase tracking-wider">Import Database Roster & Projects:</p>
-                    
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Firebase Admin Email</label>
-                        <input 
-                          type="email"
-                          value={fbEmail}
-                          onChange={(e) => setFbEmail(e.target.value)}
-                          placeholder="exceptionhubjvai@gmail.com"
-                          className="w-full px-4 py-3 bg-white border border-slate-200 text-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Firebase Admin Password</label>
-                        <div className="relative">
-                          <input 
-                            type={showFbPassword ? "text" : "password"}
-                            value={fbPassword}
-                            onChange={(e) => setFbPassword(e.target.value)}
-                            placeholder="Enter Firebase password"
-                            className="w-full pl-4 pr-12 py-3 bg-white border border-slate-200 text-slate-800 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowFbPassword(!showFbPassword)}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                          >
-                            {showFbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="flex flex-col gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleImportFromFirebase(false)}
-                        disabled={loading}
-                        className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white transition-colors rounded-xl text-[10px] font-black uppercase tracking-widest"
-                      >
-                        Import via Email/Password
-                      </button>
-                      
-                      <button
-                        type="button"
-                        onClick={() => handleImportFromFirebase(true)}
-                        disabled={loading}
-                        className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white transition-colors rounded-xl text-[10px] font-black uppercase tracking-widest"
-                      >
-                        Import via Google Sign-In
-                      </button>
-                      
-                      <button
-                        type="button"
-                        onClick={() => setIsImportPanelOpen(false)}
-                        className="w-full py-2 text-slate-500 hover:text-slate-700 transition-colors text-[9px] font-bold uppercase tracking-wider text-center"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           </form>
         )}
