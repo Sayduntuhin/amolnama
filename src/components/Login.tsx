@@ -21,6 +21,31 @@ export function Login({ initialError }: { initialError?: string }) {
   const [isForgotMode, setIsForgotMode] = useState(false);
   const [resetKey, setResetKey] = useState('');
   const [showResetKey, setShowResetKey] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+
+  const handleSendOtp = async () => {
+    if (!email) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const response = await (auth as any).sendOtp(email);
+      setOtpSent(true);
+      if (response.debug) {
+        setSuccessMessage(response.message);
+      } else {
+        setSuccessMessage('Verification OTP sent successfully to your email address!');
+      }
+    } catch (err: any) {
+      console.error('Send OTP Error:', err);
+      setError(err.message || 'Failed to send verification code. Please check your email.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,7 +180,8 @@ export function Login({ initialError }: { initialError?: string }) {
                 <input
                   type="email"
                   required
-                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm font-semibold"
+                  disabled={otpSent}
+                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm font-semibold disabled:opacity-75 disabled:bg-slate-100"
                   placeholder="developer@sprintdesk.io"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -163,49 +189,62 @@ export function Login({ initialError }: { initialError?: string }) {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Master Reset Key</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type={showResetKey ? "text" : "password"}
-                  required
-                  className="w-full pl-12 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm font-semibold"
-                  placeholder="Enter system reset key"
-                  value={resetKey}
-                  onChange={(e) => setResetKey(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowResetKey(!showResetKey)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  {showResetKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
+            {!otpSent ? (
+              <button
+                type="button"
+                onClick={handleSendOtp}
+                disabled={loading}
+                className="w-full bg-indigo-600 hover:bg-slate-900 text-white font-bold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-600/20 active:scale-95 disabled:opacity-50 text-xs uppercase tracking-widest cursor-pointer"
+              >
+                {loading ? 'Sending Code...' : 'Send Verification OTP'}
+              </button>
+            ) : (
+              <>
+                <div className="space-y-2 animate-[fadeIn_0.2s_ease-out]">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Verification OTP (6-Digit Code)</label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type={showResetKey ? "text" : "password"}
+                      required
+                      className="w-full pl-12 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm font-semibold"
+                      placeholder="Enter verification code"
+                      value={resetKey}
+                      onChange={(e) => setResetKey(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetKey(!showResetKey)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showResetKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">New Password</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  required
-                  className="w-full pl-12 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm font-semibold tracking-widest"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
+                <div className="space-y-2 animate-[fadeIn_0.2s_ease-out]">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">New Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      required
+                      className="w-full pl-12 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm font-semibold tracking-widest"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
             {error && (
               <motion.div
@@ -236,22 +275,39 @@ export function Login({ initialError }: { initialError?: string }) {
             )}
 
             <div className="space-y-4">
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-indigo-600 hover:bg-slate-900 text-white font-bold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-600/20 active:scale-95 disabled:opacity-50 text-xs uppercase tracking-widest"
-              >
-                {loading ? 'Resetting...' : 'Reset Password'}
-              </button>
+              {otpSent && (
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-indigo-600 hover:bg-slate-900 text-white font-bold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-600/20 active:scale-95 disabled:opacity-50 text-xs uppercase tracking-widest cursor-pointer"
+                >
+                  {loading ? 'Resetting...' : 'Reset Password'}
+                </button>
+              )}
+
+              {otpSent && (
+                <button
+                  type="button"
+                  onClick={handleSendOtp}
+                  disabled={loading}
+                  className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all text-[10px] uppercase tracking-wider text-center cursor-pointer"
+                >
+                  Resend Verification OTP
+                </button>
+              )}
 
               <button
                 type="button"
                 onClick={() => {
                   setIsForgotMode(false);
+                  setOtpSent(false);
                   setError('');
                   setSuccessMessage('');
+                  setEmail('');
+                  setPassword('');
+                  setResetKey('');
                 }}
-                className="w-full py-2 text-indigo-600 hover:text-indigo-800 transition-colors text-[10px] font-black uppercase tracking-widest text-center"
+                className="w-full py-2 text-indigo-600 hover:text-indigo-800 transition-colors text-[10px] font-black uppercase tracking-widest text-center cursor-pointer"
               >
                 Back to Sign In
               </button>

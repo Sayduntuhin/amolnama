@@ -341,6 +341,21 @@ class MockAuth {
     return { user: res.user };
   }
 
+  async sendOtp(email: string) {
+    const response = await fetch(API_BASE + '/api/auth/send-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.message || "Failed to send verification OTP");
+    }
+
+    return await response.json();
+  }
+
   async resetPassword(email: string, newPassword?: string, resetKey?: string) {
     const response = await fetch(API_BASE + '/api/auth/reset-password', {
       method: 'POST',

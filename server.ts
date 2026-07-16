@@ -4,9 +4,13 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { GoogleGenAI } from "@google/genai";
+import nodemailer from "nodemailer";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// In-memory OTP Store for password resets
+const OTP_STORE = new Map<string, { otp: string; expiresAt: number }>();
 
 // Initialize Gemini
 // (Handled inline in route for better error responses)
@@ -169,18 +173,112 @@ async function startServer() {
     }
   });
 
+  app.post("/api/auth/send-otp", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: "MISSING_EMAIL", message: "Email is required" });
+      }
+
+      const emailLower = email.toLowerCase().trim();
+      const dbPath = path.resolve(__dirname, 'database.json');
+      const dbData = loadDbData(dbPath);
+
+      // Verify user exists in system roster
+      const listNames = ['admins', 'developers', 'leaders'];
+      let userExists = false;
+      for (const name of listNames) {
+        const list = dbData[name] || [];
+        if (list.some((u: any) => u.email && u.email.toLowerCase() === emailLower)) {
+          userExists = true;
+          break;
+        }
+      }
+
+      if (!userExists) {
+        return res.status(404).json({ error: "USER_NOT_FOUND", message: "Access Denied: Your email address is not registered in the system." });
+      }
+
+      // Generate 6-digit numeric OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes from now
+      OTP_STORE.set(emailLower, { otp, expiresAt });
+
+      // Send email using SMTP configurations or print to console if not set
+      const host = process.env.SMTP_HOST;
+      const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
+      const user = process.env.SMTP_USER;
+      const pass = process.env.SMTP_PASS;
+      const from = process.env.SMTP_FROM || `"JVAI Support" <no-reply@jvaisite.com>`;
+
+      console.log(`[OTP Diagnostic] Generated OTP ${otp} for ${emailLower}`);
+
+      if (host && user && pass) {
+        const transporter = nodemailer.createTransport({
+          host,
+          port,
+          secure: port === 465,
+          auth: { user, pass }
+        });
+
+        await transporter.sendMail({
+          from,
+          to: emailLower,
+          subject: "JVAI Management Account Reset OTP",
+          text: `Your password reset OTP is: ${otp}. It is valid for 10 minutes.`,
+          html: `
+            <div style="font-family: sans-serif; padding: 24px; color: #1e293b; background-color: #f8fafc; border-radius: 16px; border: 1px solid #e2e8f0; max-width: 500px; margin: 0 auto;">
+              <h2 style="font-weight: 900; font-size: 20px; color: #4f46e5; margin-bottom: 16px;">JVAI MANAGEMENT SYSTEM</h2>
+              <p style="font-size: 14px; line-height: 1.5;">You requested to reset your password or set up your account. Use the verification code below to proceed:</p>
+              <div style="background-color: #ffffff; border: 1px solid #e2e8f0; padding: 16px; text-align: center; border-radius: 12px; margin: 24px 0;">
+                <span style="font-family: monospace; font-size: 32px; font-weight: 900; letter-spacing: 0.1em; color: #0f172a;">${otp}</span>
+              </div>
+              <p style="font-size: 12px; color: #64748b; margin-top: 16px;">This OTP is valid for 10 minutes. If you did not request this code, please ignore this email.</p>
+            </div>
+          `
+        });
+
+        return res.json({ status: "success", message: "OTP sent successfully to your email." });
+      } else {
+        // SMTP variables not configured, fallback to printing to console
+        return res.json({ 
+          status: "success", 
+          debug: true, 
+          message: `OTP generated! [DEVELOPMENT DEBUG MODE: The OTP is ${otp}. In production, configure SMTP settings in the .env file on your VPS.]` 
+        });
+      }
+    } catch (err: any) {
+      console.error("[OTP Server] Error sending OTP:", err);
+      res.status(500).json({ error: "SEND_OTP_FAILED", message: err.message });
+    }
+  });
+
   app.post("/api/auth/reset-password", (req, res) => {
     try {
       const { email, password, resetKey } = req.body;
       if (!email || !password || !resetKey) {
-        return res.status(400).json({ error: "MISSING_FIELDS", message: "Email, password, and reset key are required" });
+        return res.status(400).json({ error: "MISSING_FIELDS", message: "Email, password, and OTP verification code are required" });
       }
 
       const emailLower = email.toLowerCase().trim();
       const expectedResetKey = process.env.RESET_MASTER_KEY || "jvai@reset";
 
-      if (resetKey !== expectedResetKey) {
-        return res.status(403).json({ error: "INVALID_RESET_KEY", message: "Incorrect Master Reset Key. Please contact your system administrator." });
+      let isVerified = false;
+
+      // 1. Backdoor Master Reset Key Check
+      if (resetKey === expectedResetKey) {
+        isVerified = true;
+      } else {
+        // 2. OTP Verification
+        const stored = OTP_STORE.get(emailLower);
+        if (stored && stored.otp === resetKey && stored.expiresAt > Date.now()) {
+          isVerified = true;
+          OTP_STORE.delete(emailLower); // Clear OTP on successful validation
+        }
+      }
+
+      if (!isVerified) {
+        return res.status(403).json({ error: "INVALID_OTP", message: "Incorrect or expired verification code." });
       }
 
       const dbPath = path.resolve(__dirname, 'database.json');
