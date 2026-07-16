@@ -15,6 +15,30 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+  // In-memory Database Cache to minimize disk I/O and latency
+  let cachedDbData: any = null;
+
+  const loadDbData = (dbPath: string) => {
+    if (!cachedDbData) {
+      if (!fs.existsSync(dbPath)) {
+        fs.writeFileSync(dbPath, '{}', 'utf-8');
+      }
+      cachedDbData = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+      console.log(`[DB Cache] Database loaded into memory from ${dbPath}`);
+    }
+    return cachedDbData;
+  };
+
+  const saveDbData = (dbPath: string, data: any) => {
+    cachedDbData = data;
+    // Asynchronous non-blocking save to disk
+    fs.writeFile(dbPath, JSON.stringify(data, null, 2), 'utf-8', (err) => {
+      if (err) {
+        console.error("[DB Cache Error] Failed to write database to disk:", err);
+      }
+    });
+  };
+
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -58,12 +82,7 @@ async function startServer() {
 
       const emailLower = email.toLowerCase().trim();
       const dbPath = path.resolve(__dirname, 'database.json');
-      
-      if (!fs.existsSync(dbPath)) {
-        return res.status(500).json({ error: "DB_MISSING", message: "Database is not initialized" });
-      }
-
-      const dbData = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+      const dbData = loadDbData(dbPath);
 
       const findUser = (listName: string) => {
         const list = dbData[listName] || [];
@@ -108,12 +127,7 @@ async function startServer() {
 
       const emailLower = email.toLowerCase().trim();
       const dbPath = path.resolve(__dirname, 'database.json');
-      
-      if (!fs.existsSync(dbPath)) {
-        return res.status(500).json({ error: "DB_MISSING", message: "Database is not initialized" });
-      }
-
-      const dbData = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+      const dbData = loadDbData(dbPath);
 
       const listNames = ['admins', 'developers', 'leaders'];
       let targetUser: any = null;
@@ -134,7 +148,7 @@ async function startServer() {
       }
 
       targetUser.password = password;
-      fs.writeFileSync(dbPath, JSON.stringify(dbData, null, 2), 'utf-8');
+      saveDbData(dbPath, dbData);
 
       const token = "sess_" + Math.random().toString(36).substr(2, 9) + Math.random().toString(36).substr(2, 9);
       ACTIVE_SESSIONS.add(token);
@@ -170,11 +184,7 @@ async function startServer() {
       }
 
       const dbPath = path.resolve(__dirname, 'database.json');
-      if (!fs.existsSync(dbPath)) {
-        return res.status(500).json({ error: "DB_MISSING", message: "Database is not initialized" });
-      }
-
-      const dbData = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+      const dbData = loadDbData(dbPath);
 
       const listNames = ['admins', 'developers', 'leaders'];
       let targetUser: any = null;
@@ -193,7 +203,7 @@ async function startServer() {
       }
 
       targetUser.password = password;
-      fs.writeFileSync(dbPath, JSON.stringify(dbData, null, 2), 'utf-8');
+      saveDbData(dbPath, dbData);
       console.log(`[Auth Server] Password updated successfully for user ${email}`);
 
       return res.json({
@@ -230,7 +240,7 @@ async function startServer() {
       seedPasswords('leaders');
       seedPasswords('developers');
       
-      fs.writeFileSync(dbPath, JSON.stringify(payload, null, 2), 'utf-8');
+      saveDbData(dbPath, payload);
       console.log(`[Import] Database populated from live Firebase Firestore!`);
       res.json({ status: "success" });
     } catch (err: any) {
@@ -254,12 +264,7 @@ async function startServer() {
       const { action, path: dbPathName, id, data, constraints, operations } = req.body;
       const dbPath = path.resolve(__dirname, 'database.json');
       
-      // Ensure database exists
-      if (!fs.existsSync(dbPath)) {
-        fs.writeFileSync(dbPath, '{}', 'utf-8');
-      }
-      
-      const dbData = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+      const dbData = loadDbData(dbPath);
 
       const getCollection = (colPath: string) => {
         if (!dbData[colPath]) {
@@ -269,7 +274,7 @@ async function startServer() {
       };
 
       const saveDb = () => {
-        fs.writeFileSync(dbPath, JSON.stringify(dbData, null, 2), 'utf-8');
+        saveDbData(dbPath, dbData);
       };
 
       if (action === 'getDocs') {
