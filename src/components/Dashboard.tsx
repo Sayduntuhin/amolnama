@@ -88,6 +88,8 @@ const getDaysRemaining = (dateString?: string) => {
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 };
 
+let dashboardCache: any = null;
+
 export function Dashboard() {
   const { showSuccess, showError, showWarning } = useSnackbar();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -371,7 +373,20 @@ export function Dashboard() {
     }
   }, [filteredProjects, filteredDevelopers, filteredAllProjectPhases, filteredDailyLogs, projectShiftFilter]);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
+    if (!forceRefresh && dashboardCache) {
+      setProjects(dashboardCache.projects);
+      setDevelopers(dashboardCache.developers);
+      setAdmins(dashboardCache.admins);
+      setLeaders(dashboardCache.leaders);
+      setDailyLogs(dashboardCache.dailyLogs);
+      setAllProjectPhases(dashboardCache.allProjectPhases);
+      setAllIssues(dashboardCache.allIssues);
+      setCurrentLeader(dashboardCache.currentLeader);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       const email = auth.currentUser?.email;
@@ -436,6 +451,18 @@ export function Dashboard() {
         }
       });
       setAllIssues(issuesList);
+
+      // Cache the loaded data
+      dashboardCache = {
+        projects: projectsData,
+        developers: developersData,
+        admins: adminsData,
+        leaders: filteredLeaders,
+        dailyLogs: filteredLogs,
+        allProjectPhases: phasesResult,
+        allIssues: issuesList,
+        currentLeader: activeLeader
+      };
     } catch (error) {
       console.error("Dashboard failed to load initial vectors:", error);
     } finally {
@@ -497,7 +524,7 @@ export function Dashboard() {
       }
 
       showSuccess(`Timeline extension request ${decision.toLowerCase()} successfully!`);
-      loadData();
+      loadData(true);
     } catch (err) {
       console.error(err);
       showError("Failed to resolve extension request.");
@@ -1932,7 +1959,7 @@ export function Dashboard() {
                       try {
                         await progressService.updateIssue(issue.projectId, issue.id, 'Resolved');
                         showSuccess("Issue resolved successfully!");
-                        loadData();
+                        loadData(true);
                       } catch (err) {
                         console.error(err);
                         showError("Failed to resolve issue.");

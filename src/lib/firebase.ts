@@ -463,7 +463,47 @@ export function serverTimestamp() {
   return new Date().toISOString() as any;
 }
 
+const queryCache = new Map<string, any>();
+const docCache = new Map<string, any>();
+
+function clearCache(path: string) {
+  const normalizedPath = path.replace(/\/$/, '');
+  
+  // Clear getDocs query cache
+  for (const key of queryCache.keys()) {
+    try {
+      const parsed = JSON.parse(key);
+      const cachedPath = (parsed.path || '').replace(/\/$/, '');
+      if (
+        cachedPath === normalizedPath || 
+        cachedPath.startsWith(normalizedPath + '/') || 
+        normalizedPath.startsWith(cachedPath + '/')
+      ) {
+        queryCache.delete(key);
+      }
+    } catch (e) {
+      queryCache.delete(key);
+    }
+  }
+
+  // Clear getDoc cache
+  for (const key of docCache.keys()) {
+    if (
+      key === normalizedPath || 
+      key.startsWith(normalizedPath + '/') || 
+      normalizedPath.startsWith(key + '/')
+    ) {
+      docCache.delete(key);
+    }
+  }
+}
+
 export async function getDoc(docRef: any) {
+  const cacheKey = `${docRef.path}/${docRef.id}`;
+  if (docCache.has(cacheKey)) {
+    return docCache.get(cacheKey);
+  }
+
   const token = localStorage.getItem('sprintdesk_session_token') || '';
   const response = await fetch(API_BASE + '/api/db/action', {
     method: 'POST',
@@ -474,11 +514,15 @@ export async function getDoc(docRef: any) {
     body: JSON.stringify({ action: 'getDoc', path: docRef.path, id: docRef.id })
   });
   const res = await response.json();
-  return {
+  
+  const result = {
     id: docRef.id,
     exists: () => res.exists,
     data: () => res.data
   };
+
+  docCache.set(cacheKey, result);
+  return result;
 }
 
 export async function getDocFromServer(docRef: any) {
@@ -496,6 +540,11 @@ export async function getDocs(q: any) {
     constraints = q.constraints;
   }
   
+  const cacheKey = JSON.stringify({ path, constraints });
+  if (queryCache.has(cacheKey)) {
+    return queryCache.get(cacheKey);
+  }
+
   const token = localStorage.getItem('sprintdesk_session_token') || '';
   const response = await fetch(API_BASE + '/api/db/action', {
     method: 'POST',
@@ -515,13 +564,17 @@ export async function getDocs(q: any) {
     };
   });
   
-  return {
+  const result = {
     empty: docSnaps.length === 0,
     docs: docSnaps
   };
+
+  queryCache.set(cacheKey, result);
+  return result;
 }
 
 export async function addDoc(colRef: any, data: any) {
+  clearCache(colRef.path);
   const token = localStorage.getItem('sprintdesk_session_token') || '';
   const response = await fetch(API_BASE + '/api/db/action', {
     method: 'POST',
@@ -536,6 +589,7 @@ export async function addDoc(colRef: any, data: any) {
 }
 
 export async function updateDoc(docRef: any, data: any) {
+  clearCache(docRef.path);
   const token = localStorage.getItem('sprintdesk_session_token') || '';
   const response = await fetch(API_BASE + '/api/db/action', {
     method: 'POST',
@@ -550,6 +604,7 @@ export async function updateDoc(docRef: any, data: any) {
 }
 
 export async function deleteDoc(docRef: any) {
+  clearCache(docRef.path);
   const token = localStorage.getItem('sprintdesk_session_token') || '';
   const response = await fetch(API_BASE + '/api/db/action', {
     method: 'POST',
@@ -576,6 +631,14 @@ export function writeBatch(dbInstance: any) {
       operations.push({ type: 'delete', path: docRef.path, id: docRef.id });
     },
     async commit() {
+      const pathsToClear = new Set<string>();
+      operations.forEach(op => {
+        if (op.path) {
+          pathsToClear.add(op.path);
+        }
+      });
+      pathsToClear.forEach(p => clearCache(p));
+
       const token = localStorage.getItem('sprintdesk_session_token') || '';
       const response = await fetch(API_BASE + '/api/db/action', {
         method: 'POST',
